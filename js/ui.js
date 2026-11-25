@@ -24,6 +24,7 @@ function restoreDraft() {
   const d = S.draft; S.draft = null;
   if (d && Date.now() - d.t < 120000) { S.newForm = { ...d.f, focus: false }; }
 }
+const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
 const today = () => M.dateStr(new Date());
 const task = (id) => (S.data ? S.data.tasks.find((t) => t.id === id) : null);
 
@@ -288,6 +289,15 @@ function homeScreen(now) {
     [['', 'הכול'], ...d.categories.map((c) => [c.id, c.name]), ['none', 'ללא קטגוריה']].map(([id, l]) =>
       h('button', { class: 'chip', type: 'button', 'aria-pressed': String(S.cat === id), onclick: () => { S.cat = id; render(); } }, l))) : null;
   const sections = M.homeSections(d.tasks, now, { scope: S.scope, cat: S.cat });
+  let backup = null;
+  if (d.tasks.length >= 3) {
+    const last = d.settings.lastExport;
+    const days = last ? M.diffDays(now, last) : null;
+    if (days === null || days >= 14) {
+      backup = h('button', { class: 'notice backup', type: 'button', onclick: () => { S.tab = 'settings'; render(); window.scrollTo(0, 0); } },
+        icon('download-simple'), days === null ? 'עוד לא יצרת גיבוי מוצפן. לחץ כאן, כדי שהמשימות לא ילכו לאיבוד.' : `הגיבוי האחרון לפני ${days} ימים. לחץ ליצירת גיבוי חדש.`);
+    }
+  }
   let note = null;
   if (S.scope === 'all' && !S.cat && sm.today === 0 && sm.overdue === 0 && sm.open > 0) {
     note = h('p', { class: 'notice', role: 'status' }, `אין משימות מתוזמנות להיום, אבל יש ${sm.open} משימות פתוחות אחרות.`);
@@ -301,7 +311,7 @@ function homeScreen(now) {
       : h('div', { class: 'empty' }, h('p', null, S.scope === 'all' && !S.cat ? 'אין משימות פתוחות.' : 'אין משימות במסנן הזה.'),
         S.scope !== 'all' || S.cat ? h('button', { class: 'btn', type: 'button', onclick: () => { S.scope = 'all'; S.cat = ''; render(); } }, 'הצג את כל הפתוחות') : null);
   }
-  return h('main', { class: 'main' }, tiles, chips, note,
+  return h('main', { class: 'main' }, tiles, backup, chips, note,
     sections.map((s) => section(s.title, s.tasks, now, s.id === 'overdue' ? 'danger' : '')), empty,
     sm.closed ? h('button', { class: 'linkrow', type: 'button', onclick: () => { S.tab = 'closed'; render(); window.scrollTo(0, 0); } },
       icon('check-circle'), `הושלמו ובוטלו: ${sm.closed}. הצג`) : null,
@@ -498,6 +508,7 @@ async function doExport() {
     const a = h('a', { href: url, download: name });
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
+    commit((d) => { d.settings.lastExport = today(); }, { render: false });
     toast('נוצר קובץ גיבוי מוצפן');
   } catch (e) { toast('הייצוא נכשל', { bad: true }); }
 }
@@ -885,7 +896,9 @@ function setupScreen(wrap) {
       } catch (e) { return 'יצירת הכספת נכשלה'; }
     },
   });
-  wrap.append(...[pad.el,
+  wrap.append(...[!isStandalone() && !restoring && step === 'enter' ? h('div', { class: 'warnbox', role: 'note' },
+      'אתה פותח מהדפדפן ולא מהאייקון במסך הבית. הנתונים בדפדפן ובאייקון נפרדים: כספת שתיווצר כאן לא תופיע באייקון. מומלץ קודם להוסיף למסך הבית ולפתוח משם.') : null,
+    pad.el,
     step === 'confirm' ? h('button', { class: 'btn block gap', type: 'button', onclick: () => { S.setupStep = 'enter'; S.setupFirst = ''; render(); } }, 'חזרה') : null,
     step === 'enter' ? h('button', { class: 'btn block gap', type: 'button', onclick: () => { S.setup = restoring ? 'create' : 'restore'; S.setupStep = 'enter'; render(); } },
       restoring ? 'חזרה: כספת חדשה וריקה' : 'יש לי קובץ גיבוי מוצפן') : null].filter(Boolean));

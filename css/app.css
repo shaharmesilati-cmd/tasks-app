@@ -352,3 +352,5 @@ li.sub { border-radius: 14px; box-shadow: var(--shadow); border: 0; }
 li.sub.st-cancelled { opacity: .8; }
 ul.subs { display: flex; flex-direction: column; gap: .5rem; }
 ul.subs ul.subs { margin-top: .5rem; }
+.notice.backup { display: flex; align-items: center; gap: .6rem; width: 100%; text-align: start; border: 0; margin: 0 0 1rem; min-height: 52px; background: color-mix(in srgb, var(--warn) 14%, var(--surface)); }
+.notice.backup svg { flex: none; }

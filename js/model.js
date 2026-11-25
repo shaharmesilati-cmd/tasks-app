@@ -330,6 +330,7 @@ export function validateData(d) {
   const s = d.settings || {};
   out.settings.autoLockSec = [15, 30, 60, 120, 300].includes(s.autoLockSec) ? s.autoLockSec : 60;
   out.settings.theme = ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto';
+  out.settings.lastExport = isDateStr(s.lastExport) ? s.lastExport : '';
   const catIds = new Set();
   if (Array.isArray(d.categories)) {
     for (const c of d.categories.slice(0, MAX_CATEGORIES)) {

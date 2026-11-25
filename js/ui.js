@@ -183,6 +183,14 @@ async function tryComplete(id) {
   toast(res.nextDue ? `בוצע. המופע הבא: ${dueText(res.nextDue, today())}` : noDate ? 'הושלמה. לא תחזור כי אין לה תאריך יעד' : 'המשימה הושלמה ועברה ל"הושלמו"', { undo: true });
 }
 function reopen(id) { withTask(id, (t) => M.setStatus(t, 'todo')); toast('המשימה נפתחה מחדש'); }
+function animateThen(e, t, fn) {
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || M.isClosedStatus(t.status)) { fn(); return; }
+  const li = e.currentTarget.closest('li');
+  if (!li || li.classList.contains('completing')) return;
+  li.classList.add('completing');
+  setTimeout(fn, 420);
+}
 function toggleTask(id) { const t = task(id); if (!t) return; if (M.isClosedStatus(t.status)) reopen(id); else tryComplete(id); }
 
 async function deleteTask(id) {
@@ -247,7 +255,7 @@ function taskCard(t, now) {
   t.tags.forEach((g) => meta.push(h('span', { class: 'm' }, icon('tag'), g)));
   if (p.total || p.cancelled) meta.push(h('span', { class: 'm' }, `${p.done} מתוך ${p.total} הושלמו${p.cancelled ? ` · ${p.cancelled} בוטלו` : ''}`));
   return h('li', { class: `card pr${t.priority}${late ? ' late' : ''}${closed ? ' closed' : ''}${cancelled ? ' cancelled' : ''}` },
-    h('button', { class: 'cbtn', type: 'button', 'aria-label': closed ? `פתח מחדש: ${t.title}` : `סמן כהושלם: ${t.title}`, onclick: () => toggleTask(t.id) },
+    h('button', { class: 'cbtn', type: 'button', 'aria-label': closed ? `פתח מחדש: ${t.title}` : `סמן כהושלם: ${t.title}`, onclick: (e) => animateThen(e, t, () => toggleTask(t.id)) },
       h('span', { class: `circle${closed ? ' on' : ''}${cancelled ? ' x' : ''}` }, icon(cancelled ? 'x' : 'check'))),
     h('button', { class: 'open', type: 'button', onclick: () => { S.openId = t.id; render(); window.scrollTo(0, 0); } },
       h('div', { class: 'ttl' }, t.title || '(ללא כותרת)'), h('div', { class: 'meta' }, meta), p.total && !closed ? bar(p.pct) : null));
@@ -255,7 +263,7 @@ function taskCard(t, now) {
 const taskList = (list, now) => h('ul', { class: 'list' }, list.map((t) => taskCard(t, now)));
 function section(title, list, now, cls = '') {
   if (!list.length) return null;
-  return h('section', null, h('h2', { class: `sec ${cls}` }, cls === 'danger' ? icon('warning') : null, `${title} (${list.length})`), taskList(list, now));
+  return h('section', null, h('h2', { class: `sec ${cls}` }, cls === 'danger' ? icon('warning') : null, title, h('span', { class: 'count' }, String(list.length))), taskList(list, now));
 }
 
 function fab(label, onclick) {
@@ -566,7 +574,12 @@ async function wipeAll(toRestore = false) {
 }
 
 // ---------- new task form ----------
-const WHEN = [['none', 'ללא מועד'], ['today', 'היום'], ['tomorrow', 'מחר'], ['week', 'בעוד שבוע'], ['date', 'בחר תאריך']];
+const WHEN = [['today', 'היום', 'sun'], ['tomorrow', 'מחר', 'sun-horizon'], ['week', 'בעוד שבוע', 'calendar-dots'], ['date', 'בחר תאריך', 'calendar-blank'], ['none', 'ללא מועד', 'infinity']];
+function whenPicker(cur, onpick) {
+  return h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'מתי?'),
+    h('div', { class: 'whens', role: 'group', 'aria-label': 'מתי?' }, WHEN.map(([v, l, ic]) =>
+      h('button', { type: 'button', class: 'when', 'aria-pressed': String(cur === v), onclick: () => onpick(v) }, icon(ic), h('span', null, l)))));
+}
 function seg(label, options, current, onpick) {
   return h('div', { class: 'field' }, h('span', { class: 'lbl' }, label),
     h('div', { class: 'seg', role: 'group', 'aria-label': label }, options.map(([v, l]) =>
@@ -594,7 +607,7 @@ function newTaskScreen() {
       h('h1', null, 'משימה חדשה')),
     h('main', { class: 'main' },
       h('label', { class: 'field' }, h('span', { class: 'sr' }, 'כותרת'), title),
-      seg('מתי?', WHEN, f.when, (v) => { f.when = v; render(); }),
+      whenPicker(f.when, (v) => { f.when = v; render(); }),
       dateIn ? h('div', { class: 'field' }, dateIn) : null,
       timeIn,
       seg('עדיפות', M.PRIORITIES.map((l, i) => [i, l]), f.priority, (v) => { f.priority = v; render(); }),

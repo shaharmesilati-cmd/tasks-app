@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<!-- Content-Security-Policy: the app may load ONLY its own files. No outside connections of any kind. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#14213d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="כספת משימות">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>כספת משימות</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app" role="application" aria-label="כספת משימות"></div>
+<div id="dialogRoot"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="cover" hidden aria-hidden="true"><span>כספת משימות</span></div>
+<noscript><p>נדרש JavaScript כדי להפעיל את האפליקציה.</p></noscript>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

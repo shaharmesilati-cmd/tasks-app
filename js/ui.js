@@ -214,7 +214,14 @@ function catChips(current, onPick) {
 }
 
 // ---------- shared pieces ----------
-function topbar(title, { back, showUndo = true } = {}) {
+function topbar(title, { back, showUndo = true, sub = '' } = {}) {
+  if (!back) {
+    return h('header', { class: 'top big' },
+      h('div', { class: 'titles' }, h('h1', null, title), sub ? h('p', { class: 'sub' }, sub) : null),
+      h('div', { class: 'acts' },
+        showUndo ? h('button', { class: 'iconbtn', id: 'undoBtn', type: 'button', 'aria-label': 'ביטול פעולה אחרונה', disabled: S.undo.size === 0, onclick: doUndo }, icon('arrow-counter-clockwise')) : null,
+        h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'נעל עכשיו', onclick: lock }, icon('lock-simple'))));
+  }
   return h('header', { class: 'top' },
     back ? h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'חזרה', onclick: back }, icon('caret-right')) : null,
     h('h1', null, title),
@@ -238,7 +245,7 @@ function taskCard(t, now) {
   if (t.repeat !== 'none') meta.push(h('span', { class: 'm' }, icon('repeat'), M.REPEATS.find((r) => r.id === t.repeat).label));
   t.tags.forEach((g) => meta.push(h('span', { class: 'm' }, icon('tag'), g)));
   if (p.total || p.cancelled) meta.push(h('span', { class: 'm' }, `${p.done} מתוך ${p.total} הושלמו${p.cancelled ? ` · ${p.cancelled} בוטלו` : ''}`));
-  return h('li', { class: `card${late ? ' late' : ''}${closed ? ' closed' : ''}${cancelled ? ' cancelled' : ''}` },
+  return h('li', { class: `card pr${t.priority}${late ? ' late' : ''}${closed ? ' closed' : ''}${cancelled ? ' cancelled' : ''}` },
     h('button', { class: 'cbtn', type: 'button', 'aria-label': closed ? `פתח מחדש: ${t.title}` : `סמן כהושלם: ${t.title}`, onclick: () => toggleTask(t.id) },
       h('span', { class: `circle${closed ? ' on' : ''}${cancelled ? ' x' : ''}` }, icon(cancelled ? 'x' : 'check'))),
     h('button', { class: 'open', type: 'button', onclick: () => { S.openId = t.id; render(); window.scrollTo(0, 0); } },
@@ -288,7 +295,9 @@ function homeScreen(now) {
   let empty = null;
   if (!sections.length) {
     empty = !d.tasks.length
-      ? h('p', { class: 'empty' }, 'עוד אין משימות. לחץ על "משימה חדשה" כדי להתחיל.')
+      ? h('div', { class: 'hero' }, h('div', { class: 'bubble' }, icon('list-checks')), h('h2', null, 'עוד אין משימות'),
+        h('p', null, 'הוסף את הראשונה, ואפשר לפרק אותה לשלבים.'),
+        h('button', { class: 'btn primary', type: 'button', onclick: () => openNew('') }, icon('plus'), 'הוסף משימה'))
       : h('div', { class: 'empty' }, h('p', null, S.scope === 'all' && !S.cat ? 'אין משימות פתוחות.' : 'אין משימות במסנן הזה.'),
         S.scope !== 'all' || S.cat ? h('button', { class: 'btn', type: 'button', onclick: () => { S.scope = 'all'; S.cat = ''; render(); } }, 'הצג את כל הפתוחות') : null);
   }
@@ -923,7 +932,10 @@ function mainScreen() {
   else if (S.tab === 'closed') body = closedScreen(now);
   else if (S.tab === 'search') body = searchScreen(now);
   else body = settingsScreen();
-  return h('div', null, topbar(titles[S.tab]), body, navBar(now));
+  const sm = M.summary(S.data.tasks, now);
+  const dateLine = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
+  const subs = { home: `${dateLine} · ${sm.open} פתוחות`, cats: `${S.data.categories.length} קטגוריות`, closed: `${sm.closed} משימות`, search: '', settings: '' };
+  return h('div', null, topbar(titles[S.tab], { sub: subs[S.tab] }), body, navBar(now));
 }
 
 function render() {

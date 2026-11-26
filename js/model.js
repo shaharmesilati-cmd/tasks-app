@@ -281,7 +281,22 @@ function groupsOf(open, today, pull) {
   };
 }
 
-export function homeSections(tasks, today, { scope = 'all', cat = '' } = {}) {
+// Seven days starting today: how many things fall on each (due date or reminder), for the week strip.
+export function dayStrip(tasks, today, n = 7) {
+  const ent = tasks.filter(isOpen).concat(subEntries(tasks));
+  return Array.from({ length: n }, (_, i) => {
+    const date = addDays(today, i);
+    const c = ent.filter((t) => t.due === date || (t.remindDate === date && t.due !== date)).length;
+    return { date, n: c };
+  });
+}
+
+export function homeSections(tasks, today, { scope = 'all', cat = '', day = '' } = {}) {
+  if (scope === 'day') {
+    const ent = tasks.filter((t) => isOpen(t) && inCat(t, cat)).concat(subEntries(tasks).filter((t) => inCat(t, cat)));
+    const list = ent.filter((t) => t.due === day || (t.remindDate === day && t.due !== day)).sort(byDue);
+    return list.length ? [{ id: 'day', title: day, tasks: list }] : [];
+  }
   const base = scope === 'subs' ? [] : tasks.filter((t) => isOpen(t) && inCat(t, cat));
   const open = base.concat(subEntries(tasks, scope === 'subs').filter((t) => inCat(t, cat)));
   const groups = groupsOf(open, today, scope === 'all' || scope === 'today' || scope === 'subs');

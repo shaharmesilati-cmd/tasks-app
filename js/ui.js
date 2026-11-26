@@ -13,7 +13,7 @@ const S = {
   data: null,
   undo: new M.UndoStack(30),
   hasVault: false, storageError: false,
-  tab: 'home', scope: 'menu', cat: '', catOpen: null, closedKind: 'done',
+  tab: 'home', scope: 'all', day: '', cat: '', catOpen: null, closedKind: 'done',
   openId: null, newForm: null, expanded: new Set(), q: '',
   setup: 'create', setupStep: 'enter', setupFirst: '',
   flow: null, dismiss: null, fold: new Map(), more: new Set(), remindPick: null, draft: null,
@@ -135,7 +135,7 @@ function lock() {
   S.undo.clear();
   // Keep an unsent new-task form in memory only for 2 minutes, so a quick app switch does not lose typing.
   S.draft = S.newForm && S.newForm.title.trim() + S.newForm.desc.trim() ? { f: S.newForm, t: Date.now() } : null;
-  S.q = ''; S.openId = null; S.newForm = null; S.flow = null; S.catOpen = null; S.cat = ''; S.scope = 'menu';
+  S.q = ''; S.openId = null; S.newForm = null; S.flow = null; S.catOpen = null; S.cat = ''; S.scope = 'all';
   S.expanded.clear(); S.fold.clear(); S.more.clear(); S.remindPick = null; S.setupFirst = ''; S.setupStep = 'enter';
   $('dialogRoot').replaceChildren();
   $('toast').replaceChildren();
@@ -245,23 +245,28 @@ function topbar(title, { back, showUndo = true, sub = '' } = {}) {
     h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'נעל עכשיו', onclick: lock }, icon('lock-simple')));
 }
 
+const CAT_COLORS = ['#3b82f6', '#e8772e', '#8b5cf6', '#0f9d8a', '#d6477a', '#b8932a', '#2f9e44', '#5c6bc0'];
+function catColor(id) { let x = 0; for (const c of String(id)) x = (x * 31 + c.charCodeAt(0)) >>> 0; return CAT_COLORS[x % CAT_COLORS.length]; }
+function catDot(id) { const i = h('i', { class: 'dot' }); i.style.background = catColor(id); return i; }
+
 function taskCard(t, now, opts = {}) {
   const closed = M.isClosedStatus(t.status);
   const cancelled = t.status === 'cancelled';
   const late = M.isOverdue(t, now);
   const p = M.progress(t);
   const meta = [];
-  if (t.isSub) meta.push(h('span', { class: 'm' }, icon('list-checks'), `מתוך: ${t.parentTitle}`));
-  if (cancelled) meta.push(h('span', { class: 'm' }, icon('x-circle'), 'בוטל'));
-  else if (!closed && !t.isSub) meta.push(h('span', { class: `m p${t.priority}` }, icon('flag'), M.PRIORITIES[t.priority]));
+  const urgent = !closed && t.priority >= 2;
+  if (t.isSub) meta.push(h('span', { class: 'm' }, icon('arrow-bend-down-right'), t.parentTitle));
+  if (cancelled) meta.push(h('span', { class: 'm' }, 'בוטל'));
+  if (urgent) meta.push(h('span', { class: `m flag p${t.priority}` }, t.priority >= 3 ? 'דחוף' : 'חשוב'));
   if (!closed && t.status !== 'todo') meta.push(h('span', { class: 'm' }, M.statusLabel(t.status)));
-  if (t.category) meta.push(h('span', { class: 'm cat' }, icon('folder-simple'), M.catName(S.data, t.category)));
   if (closed && t.completedAt) meta.push(h('span', { class: 'm' }, fmtTime(t.completedAt)));
-  if (!closed && t.due) meta.push(h('span', { class: `m${late ? ' late' : ''}` }, icon(late ? 'warning' : 'calendar-check'), dueText(t.due, now)));
-  if (!closed && t.remindDate) meta.push(h('span', { class: `m${t.remindDate <= now ? ' late' : ''}` }, icon('clock'), `תזכורת: ${dueText(t.remindDate, now)}${t.remindAt ? ' ' + t.remindAt : ''}`));
-  if (t.repeat !== 'none') meta.push(h('span', { class: 'm' }, icon('repeat'), M.REPEATS.find((r) => r.id === t.repeat).label));
+  if (!closed && t.due) meta.push(h('span', { class: `m${late ? ' late' : ''}` }, icon('calendar-blank'), dueText(t.due, now)));
+  if (!closed && t.remindDate) meta.push(h('span', { class: `m${t.remindDate <= now ? ' due' : ''}` }, icon('clock'), `${dueText(t.remindDate, now)}${t.remindAt ? ' ' + t.remindAt : ''}`));
+  if (t.repeat !== 'none') meta.push(h('span', { class: 'm' }, icon('repeat')));
+  if (p.total) meta.push(h('span', { class: 'm' }, icon('list-checks'), `${p.done}/${p.total}`));
+  if (t.category) meta.push(h('span', { class: 'm cat' }, catDot(t.category), M.catName(S.data, t.category)));
   t.tags.forEach((g) => meta.push(h('span', { class: 'm' }, icon('tag'), g)));
-  if (p.total || p.cancelled) meta.push(h('span', { class: 'm' }, `${p.done} מתוך ${p.total} הושלמו${p.cancelled ? ` · ${p.cancelled} בוטלו` : ''}`));
   return h('li', { class: `card pr${t.priority}${late ? ' late' : ''}${closed ? ' closed' : ''}${cancelled ? ' cancelled' : ''}` },
     h('button', { class: 'cbtn', type: 'button', 'aria-label': closed ? `פתח מחדש: ${t.title}` : `סמן כהושלם: ${t.title}`, onclick: (e) => animateThen(e, t, () => (t.isSub ? toggleSub(t.id, t.nodeId) : toggleTask(t.id))) },
       h('span', { class: `circle${closed ? ' on' : ''}${cancelled ? ' x' : ''}` }, icon(cancelled ? 'x' : 'check'))),
@@ -322,20 +327,39 @@ function navBar(now) {
   const late = M.overdue(S.data.tasks, now).length;
   return h('nav', { class: 'nav', 'aria-label': 'ניווט ראשי' }, NAV.map(([id, label, ic]) =>
     h('button', { type: 'button', 'aria-current': S.tab === id && !S.catOpen ? 'page' : (S.tab === id ? 'true' : null),
-      onclick: () => { S.tab = id; S.q = ''; S.catOpen = null; if (id === 'home') S.scope = 'menu'; $('toast').replaceChildren(); render(); window.scrollTo(0, 0); } },
+      onclick: () => { S.tab = id; S.q = ''; S.catOpen = null; if (id === 'home') S.scope = 'all'; $('toast').replaceChildren(); render(); window.scrollTo(0, 0); } },
       icon(ic), label,
       id === 'home' && late ? h('span', { class: 'badge', 'aria-label': `${late} באיחור` }, String(late)) : null)));
 }
 
 // ---------- home: ALL open tasks, with today's numbers on top ----------
-const SCOPE_TITLES = { overdue: 'באיחור', today: 'היום', week: '7 הימים הקרובים', all: 'כל המשימות', subs: 'תתי-משימות' };
+const dayName = (date, o) => M.parseDate(date).toLocaleDateString('he-IL', o);
+function weekStrip(now) {
+  const days = M.dayStrip(S.data.tasks, now, 7);
+  return h('div', { class: 'week', role: 'group', 'aria-label': 'שבוע קרוב' }, days.map((d, i) => {
+    const on = S.scope === 'day' && S.day === d.date;
+    const dots = h('span', { class: 'dots3', 'aria-hidden': 'true' }, Array.from({ length: Math.min(d.n, 3) }, () => h('i')));
+    return h('button', { class: `wd${i === 0 ? ' today' : ''}${d.n ? ' has' : ''}`, type: 'button', 'aria-pressed': String(on),
+      'aria-label': `${dueText(d.date, now)}, ${d.n} משימות`,
+      onclick: () => { if (on) { S.scope = 'all'; } else { S.scope = 'day'; S.day = d.date; } S.cat = ''; render(); } },
+      h('span', { class: 'dn' }, dayName(d.date, { weekday: 'narrow' })), h('span', { class: 'dd' }, String(Number(d.date.slice(8)))), dots);
+  }));
+}
+
 function homeScreen(now) {
   const d = S.data;
   const sm = M.summary(d.tasks, now);
   const subsN = M.subEntries(d.tasks, true).length;
-  const go = (id) => { S.scope = id; S.cat = ''; render(); window.scrollTo(0, 0); };
-  const tile = (id, label, n, ic, cls = '') => h('button', { class: `tile ${cls}`, type: 'button', 'aria-label': `${label}: ${n}`, onclick: () => go(id) },
-    icon(ic), h('span', { class: 'num' }, String(n)), h('span', { class: 'lbl' }, label));
+  if (!d.tasks.length) {
+    return h('main', { class: 'main' }, h('div', { class: 'hero' }, h('div', { class: 'bubble' }, icon('list-checks')), h('h2', null, 'עוד אין משימות'),
+      h('button', { class: 'btn primary', type: 'button', onclick: () => openNew('') }, icon('plus'), 'הוסף משימה')),
+      fab('משימה חדשה', () => openNew('')));
+  }
+  const FILT = [['all', 'הכול', sm.open], ['overdue', 'באיחור', sm.overdue], ['today', 'היום', sm.today], ['week', '7 ימים', sm.week], ['subs', 'תתי-משימות', subsN]];
+  const filters = h('div', { class: 'filters', role: 'group', 'aria-label': 'סינון' },
+    FILT.map(([id, l, n]) => h('button', { class: `f${id === 'overdue' && n ? ' late' : ''}`, type: 'button', 'aria-pressed': String(S.scope === id),
+      onclick: () => { S.scope = id; S.cat = ''; render(); } }, l, h('span', { class: 'n' }, String(n)))),
+    h('button', { class: 'f ghost', type: 'button', onclick: () => { S.tab = 'closed'; render(); window.scrollTo(0, 0); } }, icon('check-circle'), 'הושלמו'));
   let backup = null;
   if (d.tasks.length >= 3) {
     const last = d.settings.lastExport;
@@ -345,37 +369,23 @@ function homeScreen(now) {
         icon('download-simple'), days === null ? 'אין גיבוי עדיין. לחץ ליצירה.' : `גיבוי אחרון לפני ${days} ימים.`);
     }
   }
-  if (S.scope === 'menu') {
-    if (!d.tasks.length) {
-      return h('main', { class: 'main' }, h('div', { class: 'hero' }, h('div', { class: 'bubble' }, icon('list-checks')), h('h2', null, 'עוד אין משימות'),
-        h('button', { class: 'btn primary', type: 'button', onclick: () => openNew('') }, icon('plus'), 'הוסף משימה')),
-        fab('משימה חדשה', () => openNew('')));
-    }
-    return h('main', { class: 'main' },
-      h('div', { class: 'tiles menu' },
-        tile('overdue', 'באיחור', sm.overdue, 'warning', sm.overdue ? 'late' : ''), tile('today', 'היום', sm.today, 'sun'),
-        tile('week', '7 ימים', sm.week, 'calendar-dots'), tile('all', 'כל המשימות', sm.open, 'list-checks'),
-        tile('subs', 'תתי-משימות', subsN, 'list-checks')),
-      backup, fab('משימה חדשה', () => openNew('')));
-  }
-  const chips = d.categories.length ? h('div', { class: 'chips', role: 'group', 'aria-label': 'קטגוריה' },
-    [['', 'הכול'], ...d.categories.map((c) => [c.id, c.name]), ['none', 'ללא קטגוריה']].map(([id, l]) =>
-      h('button', { class: 'chip', type: 'button', 'aria-pressed': String(S.cat === id), onclick: () => { S.cat = id; render(); } }, l))) : null;
-  const timeSections = M.homeSections(d.tasks, now, { scope: S.scope, cat: S.cat });
+  const chips = d.categories.length ? h('div', { class: 'cats', role: 'group', 'aria-label': 'קטגוריה' },
+    [['', 'כל הקטגוריות'], ...d.categories.map((c) => [c.id, c.name]), ['none', 'ללא קטגוריה']].map(([id, l]) =>
+      h('button', { class: 'c', type: 'button', 'aria-pressed': String(S.cat === id), onclick: () => { S.cat = id; render(); } },
+        id && id !== 'none' ? catDot(id) : null, l))) : null;
+  const timeSections = M.homeSections(d.tasks, now, { scope: S.scope, cat: S.cat, day: S.day });
   const view = d.settings.view || 'time';
   const grouped = S.scope === 'all' || S.scope === 'subs';
-  const sections = view === 'time' || !grouped ? timeSections : regroup(timeSections, view);
+  const sections = view === 'time' || !grouped ? timeSections : regroup(timeSections, view).map((x) => x);
+  sections.forEach((x) => { if (x.id === 'day') x.title = `${dueText(x.tasks[0].due === S.day ? S.day : S.day, now)} · ${dayName(S.day, { day: 'numeric', month: 'long' })}`; });
   const crowded = sm.open > CROWDED && S.scope === 'all' && !S.cat;
-  const viewSwitch = grouped && sm.open > 4 ? h('div', { class: 'viewseg', role: 'group', 'aria-label': 'תצוגה' }, VIEWS.map(([v, l]) =>
+  const viewSwitch = grouped && sm.open > CROWDED ? h('div', { class: 'viewseg', role: 'group', 'aria-label': 'תצוגה' }, VIEWS.map(([v, l]) =>
     h('button', { type: 'button', 'aria-pressed': String(view === v), onclick: () => { commit((x) => { x.settings.view = v; }); } }, l))) : null;
-  const empty = !sections.length ? h('div', { class: 'empty' }, h('p', null, 'אין כאן משימות.')) : null;
-  return h('main', { class: 'main' },
-    h('div', { class: 'scopehead' },
-      h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'חזרה למסך הראשי', onclick: () => go('menu') }, icon('caret-right')),
-      h('h2', null, SCOPE_TITLES[S.scope])),
-    viewSwitch, chips,
-    sections.map((s, i) => foldSection(s, now, { crowded, forceOpen: S.scope !== 'all' || !!S.cat, idx: i })), empty,
-    fab('משימה חדשה', () => openNew(S.cat && S.cat !== 'none' ? S.cat : '')));
+  const empty = !sections.length ? h('div', { class: 'empty' }, icon(S.scope === 'day' ? 'calendar-blank' : 'check-circle'),
+    h('p', null, S.scope === 'all' && !S.cat ? 'הכול הושלם' : 'אין כאן משימות')) : null;
+  return h('main', { class: 'main' }, weekStrip(now), filters, chips, viewSwitch,
+    sections.map((x, i) => foldSection(x, now, { crowded, forceOpen: S.scope !== 'all' || !!S.cat, idx: i })), empty, backup,
+    fab('משימה חדשה', () => openNew(S.cat && S.cat !== 'none' ? S.cat : (S.scope === 'day' ? '' : ''))));
 }
 
 // ---------- categories ----------
@@ -386,7 +396,7 @@ function catsScreen() {
     d.categories.length ? null : h('p', { class: 'notice' }, 'קטגוריות מחלקות משימות לפי נושא, למשל פרויקט או יחידה. הוסף את הראשונה.'),
     h('ul', { class: 'list' }, stats.map((r) => h('li', null,
       h('button', { class: 'catrow', type: 'button', onclick: () => { S.catOpen = r.id; render(); window.scrollTo(0, 0); } },
-        h('span', { class: 'grow' }, h('strong', null, r.name), h('span', { class: 'muted' }, ` ${r.open} פתוחות${r.closed ? ` · ${r.closed} הושלמו` : ''}`)),
+        h('span', { class: 'grow' }, r.id !== 'none' ? catDot(r.id) : null, h('strong', null, r.name), h('span', { class: 'muted' }, ` ${r.open} פתוחות${r.closed ? ` · ${r.closed} הושלמו` : ''}`)),
         icon('caret-left'))))),
     h('button', { class: 'btn primary block gap', type: 'button', onclick: () => newCategory((id) => { S.catOpen = id; render(); }) }, icon('plus'), 'קטגוריה חדשה'));
 }
@@ -791,9 +801,10 @@ function detailScreen(id) {
         (S.remindPick === id || t.remindDate) ? h('div', { class: 'row wrap gap' },
           h('div', { class: 'grow' }, dateField('תאריך התזכורת', t.remindDate, (v) => { S.remindPick = null; withTask(id, (x) => { x.remindDate = v; M.addLog(x, v ? `תזכורת: ${v}` : 'התזכורת הוסרה'); }); })),
           h('div', { class: 'grow' }, dateField('שעה (לא חובה)', t.remindAt, (v) => withTask(id, (x) => { x.remindAt = v; }, { render: false }), 'time'))) : null,
-        h('p', { class: 'hint' }, 'התזכורת מופיעה בראש המסך הראשי כשמגיע היום שלה. האפליקציה לא שולחת התראות לטלפון, כדי שלא יצא ממנה מידע.')),
+        null),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'קטגוריה'),
         catChips(t.category, (cid) => withTask(id, (x, d) => { if (x.category !== cid) { x.category = cid; M.addLog(x, `קטגוריה: ${cid ? M.catName(d, cid) : 'ללא'}`); } }))),
+      h('details', { class: 'fold', ...((t.desc || t.tags.length || t.repeat !== 'none') ? { open: true } : {}) }, h('summary', null, 'עוד: חזרתיות, תיאור, תגיות'),
       h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'חזרתיות'),
         h('select', { 'aria-label': 'חזרתיות', onchange: (e) => withTask(id, (x) => { x.repeat = e.target.value; M.addLog(x, `חזרתיות: ${M.REPEATS.find((r) => r.id === e.target.value).label}`); }) },
           M.REPEATS.map((r) => h('option', { value: r.id, ...(t.repeat === r.id ? { selected: true } : {}) }, r.label)))),
@@ -802,7 +813,7 @@ function detailScreen(id) {
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'תגיות'),
         t.tags.length ? h('div', { class: 'tagrow' }, t.tags.map((g) => h('span', { class: 'tag' }, g,
           h('button', { type: 'button', 'aria-label': `הסר תג ${g}`, onclick: () => withTask(id, (x) => { x.tags = x.tags.filter((z) => z !== g); M.addLog(x, `הוסרה תגית: ${g}`); }) }, icon('x'))))) : null,
-        h('div', { class: 'row' }, h('div', { class: 'grow' }, tagInput), h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'הוסף תג', onclick: addTag }, icon('plus')))),
+        h('div', { class: 'row' }, h('div', { class: 'grow' }, tagInput), h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'הוסף תג', onclick: addTag }, icon('plus'))))),
 
       h('details', { class: 'log' }, h('summary', null, `יומן שינויים (${t.log.length})`),
         h('ol', null, [...t.log].reverse().map((l) => h('li', null, l.m, h('time', null, fmtTime(l.t)))))),
@@ -880,7 +891,7 @@ function subItem(t, list, n, index, depth) {
 
   if (open) {
     const note = h('textarea', { 'aria-label': 'הערה או סיבה', placeholder: 'הערה או סיבה (למשל למה בוטל)', ...NOASSIST, value: n.note, maxlength: '5000' });
-    note.style.minHeight = '5rem';
+    note.style.minHeight = '3.5rem';
     note.addEventListener('change', () => edit((x) => { x.note = note.value; }, null, { render: false }));
     const childIn = depth === 1 ? h('input', { type: 'text', 'aria-label': 'תת-משימה פנימית חדשה', placeholder: 'תת-משימה פנימית ו-Enter', ...NOASSIST, maxlength: '300' }) : null;
     if (childIn) childIn.addEventListener('keydown', (e) => {
@@ -899,16 +910,9 @@ function subItem(t, list, n, index, depth) {
           h('button', { type: 'button', 'aria-pressed': String(st === s.id), onclick: () => setState(s.id) }, s.label)))),
       h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'הערה או סיבה'), note),
       seg('עדיפות', M.PRIORITIES.map((l, i) => [i, l]), n.priority ?? 1, (v) => edit((x) => { x.priority = v; }, null)),
-      dateField('תאריך יעד לתת-משימה', n.due, (v) => edit((x) => { x.due = v; }, null), 'date'),
-      h('div', { class: 'field' }, h('span', { class: 'lbl' }, n.remindDate ? `תזכורת: ${dueText(n.remindDate, today())}${n.remindAt ? ' ' + n.remindAt : ''}` : 'תזכורת לתת-משימה'),
-        remindChips(S.remindPick === nid ? 'date' : '', (v) => {
-          if (v === 'date') { S.remindPick = nid; render(); return; }
-          S.remindPick = null;
-          edit((x) => { x.remindDate = v ? M.addDays(today(), Number(v)) : ''; if (!v) x.remindAt = ''; }, null);
-        }),
-        (S.remindPick === nid || n.remindDate) ? h('div', { class: 'row wrap gap' },
-          h('div', { class: 'grow' }, dateField('תאריך התזכורת', n.remindDate, (v) => { S.remindPick = null; edit((x) => { x.remindDate = v; }, null); })),
-          h('div', { class: 'grow' }, dateField('שעה (לא חובה)', n.remindAt, (v) => edit((x) => { x.remindAt = v; }, null, { render: false }), 'time'))) : null),
+      h('div', { class: 'row gap' },
+        h('div', { class: 'grow' }, dateField('יעד', n.due, (v) => edit((x) => { x.due = v; }, null), 'date')),
+        h('div', { class: 'grow' }, dateField('תזכורת', n.remindDate, (v) => edit((x) => { x.remindDate = v; if (!v) x.remindAt = ''; }, null), 'date'))),
       h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'קטגוריה'), catSel),
       childIn ? h('div', { class: 'field' }, childIn) : null,
       h('div', { class: 'row' },
@@ -1060,7 +1064,7 @@ function flowScreen() {
 function mainScreen() {
   const now = today();
   if (S.tab === 'cats' && S.catOpen) return catScreen(now);
-  const titles = { home: 'המשימות שלי', cats: 'קטגוריות', closed: 'הושלמו ובוטלו', search: 'חיפוש', settings: 'הגדרות' };
+  const titles = { home: new Date().toLocaleDateString('he-IL', { weekday: 'long' }), cats: 'קטגוריות', closed: 'הושלמו ובוטלו', search: 'חיפוש', settings: 'הגדרות' };
   let body;
   if (S.tab === 'home') body = homeScreen(now);
   else if (S.tab === 'cats') body = catsScreen();
@@ -1069,7 +1073,7 @@ function mainScreen() {
   else body = settingsScreen();
   const sm = M.summary(S.data.tasks, now);
   const dateLine = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
-  const subs = { home: dateLine, cats: `${S.data.categories.length} קטגוריות`, closed: `${sm.closed} משימות`, search: '', settings: '' };
+  const subs = { home: new Date().toLocaleDateString('he-IL', { day: 'numeric', month: 'long' }), cats: `${S.data.categories.length} קטגוריות`, closed: `${sm.closed} משימות`, search: '', settings: '' };
   return h('div', null, topbar(titles[S.tab], { sub: subs[S.tab] }), body, navBar(now));
 }
 

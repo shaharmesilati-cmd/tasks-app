@@ -16,7 +16,7 @@ const S = {
   tab: 'home', scope: 'all', cat: '', catOpen: null, closedKind: 'done',
   openId: null, newForm: null, expanded: new Set(), q: '',
   setup: 'create', setupStep: 'enter', setupFirst: '',
-  flow: null, dismiss: null,
+  flow: null, dismiss: null, fold: new Map(), more: new Set(), remindPick: null, draft: null,
 };
 let idleTimer = null, waitTimer = null, toastTimer = null, lastActive = 0;
 
@@ -25,6 +25,9 @@ function restoreDraft() {
   if (d && Date.now() - d.t < 120000) { S.newForm = { ...d.f, focus: false }; }
 }
 const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+const lenHint = () => { try { const n = Number(localStorage.getItem('st.len')); return n >= 4 && n <= 40 ? n : 0; } catch (e) { return 0; } };
+const setLen = (n) => { try { localStorage.setItem('st.len', String(n)); } catch (e) { /* ignore */ } };
+const clearLen = () => { try { localStorage.removeItem('st.len'); } catch (e) { /* ignore */ } };
 const today = () => M.dateStr(new Date());
 const task = (id) => (S.data ? S.data.tasks.find((t) => t.id === id) : null);
 
@@ -133,7 +136,7 @@ function lock() {
   // Keep an unsent new-task form in memory only for 2 minutes, so a quick app switch does not lose typing.
   S.draft = S.newForm && S.newForm.title.trim() + S.newForm.desc.trim() ? { f: S.newForm, t: Date.now() } : null;
   S.q = ''; S.openId = null; S.newForm = null; S.flow = null; S.catOpen = null; S.cat = ''; S.scope = 'all';
-  S.expanded.clear(); S.setupFirst = ''; S.setupStep = 'enter';
+  S.expanded.clear(); S.fold.clear(); S.more.clear(); S.remindPick = null; S.setupFirst = ''; S.setupStep = 'enter';
   $('dialogRoot').replaceChildren();
   $('toast').replaceChildren();
   render();
@@ -191,6 +194,10 @@ function animateThen(e, t, fn) {
   li.classList.add('completing');
   setTimeout(fn, 420);
 }
+function toggleSub(id, nid) {
+  commit((d) => { const t = d.tasks.find((x) => x.id === id); const f = t && M.findNode(t.subtasks, nid); if (f) { M.setNodeState(f.node, 'done'); M.addLog(t, `תת-משימה "${f.node.title}": הושלמה`); } });
+  toast('תת-המשימה הושלמה', { undo: true });
+}
 function toggleTask(id) { const t = task(id); if (!t) return; if (M.isClosedStatus(t.status)) reopen(id); else tryComplete(id); }
 
 async function deleteTask(id) {
@@ -238,39 +245,75 @@ function topbar(title, { back, showUndo = true, sub = '' } = {}) {
     h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'נעל עכשיו', onclick: lock }, icon('lock-simple')));
 }
 
-function taskCard(t, now) {
+function taskCard(t, now, opts = {}) {
   const closed = M.isClosedStatus(t.status);
   const cancelled = t.status === 'cancelled';
   const late = M.isOverdue(t, now);
   const p = M.progress(t);
   const meta = [];
+  if (t.isSub) meta.push(h('span', { class: 'm' }, icon('list-checks'), `מתוך: ${t.parentTitle}`));
   if (cancelled) meta.push(h('span', { class: 'm' }, icon('x-circle'), 'בוטל'));
-  else if (!closed) meta.push(h('span', { class: `m p${t.priority}` }, icon('flag'), M.PRIORITIES[t.priority]));
+  else if (!closed && !t.isSub) meta.push(h('span', { class: `m p${t.priority}` }, icon('flag'), M.PRIORITIES[t.priority]));
   if (!closed && t.status !== 'todo') meta.push(h('span', { class: 'm' }, M.statusLabel(t.status)));
   if (t.category) meta.push(h('span', { class: 'm cat' }, icon('folder-simple'), M.catName(S.data, t.category)));
   if (closed && t.completedAt) meta.push(h('span', { class: 'm' }, fmtTime(t.completedAt)));
   if (!closed && t.due) meta.push(h('span', { class: `m${late ? ' late' : ''}` }, icon(late ? 'warning' : 'calendar-check'), dueText(t.due, now)));
-  if (!closed && t.remindAt) meta.push(h('span', { class: 'm' }, icon('clock'), t.remindAt));
+  if (!closed && t.remindDate) meta.push(h('span', { class: `m${t.remindDate <= now ? ' late' : ''}` }, icon('clock'), `תזכורת: ${dueText(t.remindDate, now)}${t.remindAt ? ' ' + t.remindAt : ''}`));
   if (t.repeat !== 'none') meta.push(h('span', { class: 'm' }, icon('repeat'), M.REPEATS.find((r) => r.id === t.repeat).label));
   t.tags.forEach((g) => meta.push(h('span', { class: 'm' }, icon('tag'), g)));
   if (p.total || p.cancelled) meta.push(h('span', { class: 'm' }, `${p.done} מתוך ${p.total} הושלמו${p.cancelled ? ` · ${p.cancelled} בוטלו` : ''}`));
   return h('li', { class: `card pr${t.priority}${late ? ' late' : ''}${closed ? ' closed' : ''}${cancelled ? ' cancelled' : ''}` },
-    h('button', { class: 'cbtn', type: 'button', 'aria-label': closed ? `פתח מחדש: ${t.title}` : `סמן כהושלם: ${t.title}`, onclick: (e) => animateThen(e, t, () => toggleTask(t.id)) },
+    h('button', { class: 'cbtn', type: 'button', 'aria-label': closed ? `פתח מחדש: ${t.title}` : `סמן כהושלם: ${t.title}`, onclick: (e) => animateThen(e, t, () => (t.isSub ? toggleSub(t.id, t.nodeId) : toggleTask(t.id))) },
       h('span', { class: `circle${closed ? ' on' : ''}${cancelled ? ' x' : ''}` }, icon(cancelled ? 'x' : 'check'))),
     h('button', { class: 'open', type: 'button', onclick: () => { S.openId = t.id; render(); window.scrollTo(0, 0); } },
-      h('div', { class: 'ttl' }, t.title || '(ללא כותרת)'), h('div', { class: 'meta' }, meta), p.total && !closed ? bar(p.pct) : null));
+      h('div', { class: 'ttl' }, t.title || '(ללא כותרת)'), h('div', { class: 'meta' }, meta), p.total && !closed ? bar(p.pct) : null),
+    opts.dismiss ? h('button', { class: 'pill', type: 'button', 'aria-label': `סמן תזכורת כטופלה: ${t.title}`, onclick: () => { withTask(t.id, (x) => { const f = t.isSub ? M.findNode(x.subtasks, t.nodeId) : null; const o = f ? f.node : x; o.remindDate = ''; o.remindAt = ''; M.addLog(x, 'התזכורת טופלה'); }); toast('התזכורת הוסרה', { undo: true }); } }, 'טופל') : null);
 }
-const taskList = (list, now) => h('ul', { class: 'list' }, list.map((t) => taskCard(t, now)));
+const taskList = (list, now, opts) => h('ul', { class: 'list' }, list.map((t) => taskCard(t, now, opts)));
 function section(title, list, now, cls = '') {
   if (!list.length) return null;
   return h('section', null, h('h2', { class: `sec ${cls}` }, cls === 'danger' ? icon('warning') : null, title, h('span', { class: 'count' }, String(list.length))), taskList(list, now));
+}
+
+// Home sections: the urgent groups stay open, the rest fold away when there are many tasks, so the screen never feels like a wall.
+const CROWDED = 8, SHOW_FIRST = 8;
+function foldSection(sec, now, { crowded, forceOpen, idx }) {
+  const id = sec.id;
+  const urgent = id === 'overdue' || id === 'remind' || id === 'today';
+  const defOpen = forceOpen || !crowded || urgent || (idx < 2 && !['soon', 'later', 'nodate'].includes(id));
+  const open = S.fold.has(id) ? S.fold.get(id) : defOpen;
+  const danger = id === 'overdue';
+  const total = sec.tasks.length;
+  const showAll = S.more.has(id) || total <= SHOW_FIRST + 2;
+  const shown = open ? (showAll ? sec.tasks : sec.tasks.slice(0, SHOW_FIRST)) : [];
+  const preview = !open ? sec.tasks.slice(0, 2).map((t) => t.title).join(' · ') : '';
+  return h('section', { class: `fsec${open ? ' open' : ''}` },
+    h('button', { class: `sechead${danger ? ' danger' : ''}`, type: 'button', 'aria-expanded': String(open), onclick: () => { S.fold.set(id, !open); render(); } },
+      icon(open ? 'caret-down' : 'caret-left'),
+      danger ? icon('warning') : id === 'remind' ? icon('clock') : null,
+      h('span', { class: 'st' }, sec.title),
+      !open && preview ? h('span', { class: 'pv' }, preview) : null,
+      h('span', { class: 'count' }, String(total))),
+    open ? taskList(shown, now, id === 'remind' ? { dismiss: true } : undefined) : null,
+    open && !showAll ? h('button', { class: 'linkrow more', type: 'button', onclick: () => { S.more.add(id); render(); } }, `הצג עוד ${total - SHOW_FIRST}`) : null);
+}
+const VIEWS = [['time', 'לפי זמן'], ['cat', 'לפי קטגוריה'], ['prio', 'לפי עדיפות']];
+function regroup(sections, view) {
+  const all = sections.flatMap((s) => s.tasks);
+  const byPrio = (a, b) => b.priority - a.priority;
+  if (view === 'prio') {
+    return [3, 2, 1, 0].map((p) => ({ id: `p${p}`, title: M.PRIORITIES[p], tasks: all.filter((t) => t.priority === p) })).filter((x) => x.tasks.length);
+  }
+  const cats = [...S.data.categories.map((c) => ({ id: `c${c.id}`, title: c.name, tasks: all.filter((t) => t.category === c.id).sort(byPrio) })),
+    { id: 'cnone', title: 'ללא קטגוריה', tasks: all.filter((t) => !t.category).sort(byPrio) }];
+  return cats.filter((x) => x.tasks.length);
 }
 
 function fab(label, onclick) {
   return h('button', { class: 'fab', type: 'button', 'aria-label': label, onclick }, icon('plus'), h('span', null, label));
 }
 function openNew(cat = '') {
-  S.newForm = { title: '', when: 'none', date: '', time: '', priority: 1, category: cat, desc: '', repeat: 'none', focus: true };
+  S.newForm = { title: '', when: 'none', date: '', remind: '', remindDate: '', remindTime: '', priority: 1, category: cat, desc: '', repeat: 'none', focus: true };
   render(); window.scrollTo(0, 0);
 }
 
@@ -296,7 +339,12 @@ function homeScreen(now) {
   const chips = d.categories.length ? h('div', { class: 'chips', role: 'group', 'aria-label': 'קטגוריה' },
     [['', 'הכול'], ...d.categories.map((c) => [c.id, c.name]), ['none', 'ללא קטגוריה']].map(([id, l]) =>
       h('button', { class: 'chip', type: 'button', 'aria-pressed': String(S.cat === id), onclick: () => { S.cat = id; render(); } }, l))) : null;
-  const sections = M.homeSections(d.tasks, now, { scope: S.scope, cat: S.cat });
+  const timeSections = M.homeSections(d.tasks, now, { scope: S.scope, cat: S.cat });
+  const view = d.settings.view || 'time';
+  const sections = view === 'time' ? timeSections : regroup(timeSections, view);
+  const crowded = sm.open > CROWDED && S.scope === 'all' && !S.cat;
+  const viewSwitch = sm.open > 4 ? h('div', { class: 'viewseg', role: 'group', 'aria-label': 'תצוגה' }, VIEWS.map(([v, l]) =>
+    h('button', { type: 'button', 'aria-pressed': String(view === v), onclick: () => { commit((x) => { x.settings.view = v; }); } }, l))) : null;
   let backup = null;
   if (d.tasks.length >= 3) {
     const last = d.settings.lastExport;
@@ -319,8 +367,8 @@ function homeScreen(now) {
       : h('div', { class: 'empty' }, h('p', null, S.scope === 'all' && !S.cat ? 'אין משימות פתוחות.' : 'אין משימות במסנן הזה.'),
         S.scope !== 'all' || S.cat ? h('button', { class: 'btn', type: 'button', onclick: () => { S.scope = 'all'; S.cat = ''; render(); } }, 'הצג את כל הפתוחות') : null);
   }
-  return h('main', { class: 'main' }, tiles, backup, chips, note,
-    sections.map((s) => section(s.title, s.tasks, now, s.id === 'overdue' ? 'danger' : '')), empty,
+  return h('main', { class: 'main' }, tiles, backup, viewSwitch, chips, note,
+    sections.map((s, i) => foldSection(s, now, { crowded, forceOpen: S.scope !== 'all' || !!S.cat, idx: i })), empty,
     sm.closed ? h('button', { class: 'linkrow', type: 'button', onclick: () => { S.tab = 'closed'; render(); window.scrollTo(0, 0); } },
       icon('check-circle'), `הושלמו ובוטלו: ${sm.closed}. הצג`) : null,
     fab('משימה חדשה', () => openNew(S.cat && S.cat !== 'none' ? S.cat : '')));
@@ -595,8 +643,11 @@ function newTaskScreen() {
   const desc = h('textarea', { 'aria-label': 'פירוט קצר', placeholder: 'פירוט קצר (לא חובה)', ...NOASSIST, value: f.desc, maxlength: '20000' });
   desc.addEventListener('input', () => { f.desc = desc.value; });
   const dateIn = f.when === 'date' ? h('input', { type: 'date', 'aria-label': 'תאריך יעד', value: f.date, onchange: (e) => { f.date = e.target.value; } }) : null;
-  const timeIn = f.when !== 'none' ? h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'שעת תזכורת (לא חובה)'),
-    h('input', { type: 'time', value: f.time, onchange: (e) => { f.time = e.target.value; } })) : null;
+  const remEl = h('details', { class: 'fold', ...(f.remind || f.remOpen ? { open: true } : {}) }, h('summary', { onclick: () => { f.remOpen = true; } }, f.remind ? 'תזכורת: ' + (REMIND.find((r) => r[0] === f.remind) || [0, ''])[1] : 'תזכורת (לא חובה)'),
+    remindChips(f.remind, (v) => { f.remind = v; render(); }),
+    f.remind === 'date' ? h('div', { class: 'row wrap gap' },
+      h('div', { class: 'grow' }, dateField('תאריך התזכורת', f.remindDate, (v) => { f.remindDate = v; })),
+      h('div', { class: 'grow' }, dateField('שעה (לא חובה)', f.remindTime, (v) => { f.remindTime = v; }, 'time'))) : null);
   const rep = f.when !== 'none' ? h('details', { class: 'fold' }, h('summary', null, 'עוד אפשרויות: חזרתיות'),
     h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'חזרתיות'),
       h('select', { 'aria-label': 'חזרתיות', onchange: (e) => { f.repeat = e.target.value; } },
@@ -609,10 +660,10 @@ function newTaskScreen() {
       h('label', { class: 'field' }, h('span', { class: 'sr' }, 'כותרת'), title),
       whenPicker(f.when, (v) => { f.when = v; render(); }),
       dateIn ? h('div', { class: 'field' }, dateIn) : null,
-      timeIn,
       seg('עדיפות', M.PRIORITIES.map((l, i) => [i, l]), f.priority, (v) => { f.priority = v; render(); }),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'קטגוריה'), catChips(f.category, (id) => { f.category = id; render(); })),
       h('label', { class: 'field' }, h('span', { class: 'sr' }, 'פירוט'), desc),
+      remEl,
       rep,
       h('div', { class: 'actions' },
         h('button', { class: 'btn primary block', type: 'button', onclick: () => submitNew(false) }, icon('plus'), 'הוסף משימה'),
@@ -633,8 +684,10 @@ function submitNew(openAfter) {
     if (!f.date) { toast('בחר תאריך או "ללא מועד"', { bad: true }); return; }
     due = f.date;
   }
+  let remD = '';
+  if (f.remind === 'date') remD = f.remindDate; else if (f.remind) remD = M.addDays(now, Number(f.remind));
   const t = M.newTask(title, new Date(), {
-    due, remindAt: due ? f.time : '', priority: f.priority, category: f.category,
+    due, remindDate: remD, remindAt: remD ? f.remindTime : '', priority: f.priority, category: f.category,
     desc: f.desc.trim(), repeat: due ? f.repeat : 'none',
   });
   commit((d) => d.tasks.push(t), { render: false });
@@ -642,6 +695,13 @@ function submitNew(openAfter) {
   S.openId = openAfter ? t.id : null;
   render(); window.scrollTo(0, 0);
   toast('המשימה נוספה', { undo: !openAfter });
+}
+
+// ---------- reminders: a date of their own, independent of the due date ----------
+const REMIND = [['', 'ללא'], ['1', 'מחר'], ['3', 'בעוד 3 ימים'], ['7', 'בעוד שבוע'], ['date', 'בחר תאריך']];
+function remindChips(cur, onpick) {
+  return h('div', { class: 'chips wrap', role: 'group', 'aria-label': 'תזכורת' }, REMIND.map(([v, l]) =>
+    h('button', { class: 'chip', type: 'button', 'aria-pressed': String(cur === v), onclick: () => onpick(v) }, l)));
 }
 
 // ---------- task detail: sub-tasks first, details below ----------
@@ -695,9 +755,17 @@ function detailScreen(id) {
 
       h('h2', { class: 'sec' }, 'פרטי המשימה'),
       seg('עדיפות', M.PRIORITIES.map((l, i) => [i, l]), t.priority, (v) => withTask(id, (x) => { if (x.priority !== v) { x.priority = v; M.addLog(x, `עדיפות: ${M.PRIORITIES[v]}`); } })),
-      h('div', { class: 'row wrap' },
-        h('div', { class: 'grow' }, dateField('תאריך יעד (ריק = ללא מועד)', t.due, (v) => withTask(id, (x) => { x.due = v; M.addLog(x, v ? `תאריך יעד: ${v}` : 'תאריך יעד הוסר'); }, { render: false }))),
-        h('div', { class: 'grow' }, dateField('שעת תזכורת', t.remindAt, (v) => withTask(id, (x) => { x.remindAt = v; M.addLog(x, v ? `שעת תזכורת: ${v}` : 'תזכורת הוסרה'); }, { render: false }), 'time'))),
+      dateField('תאריך יעד (ריק = ללא מועד)', t.due, (v) => withTask(id, (x) => { x.due = v; M.addLog(x, v ? `תאריך יעד: ${v}` : 'תאריך יעד הוסר'); }, { render: false })),
+      h('div', { class: 'field' }, h('span', { class: 'lbl' }, t.remindDate ? `תזכורת: ${dueText(t.remindDate, today())}${t.remindAt ? ' ' + t.remindAt : ''}` : 'תזכורת (יכולה להיות לפני תאריך היעד)'),
+        remindChips(S.remindPick === id ? 'date' : '', (v) => {
+          if (v === 'date') { S.remindPick = id; render(); return; }
+          S.remindPick = null;
+          withTask(id, (x) => { x.remindDate = v ? M.addDays(today(), Number(v)) : ''; if (!v) x.remindAt = ''; M.addLog(x, v ? `תזכורת: ${x.remindDate}` : 'התזכורת הוסרה'); });
+        }),
+        (S.remindPick === id || t.remindDate) ? h('div', { class: 'row wrap gap' },
+          h('div', { class: 'grow' }, dateField('תאריך התזכורת', t.remindDate, (v) => { S.remindPick = null; withTask(id, (x) => { x.remindDate = v; M.addLog(x, v ? `תזכורת: ${v}` : 'התזכורת הוסרה'); }); })),
+          h('div', { class: 'grow' }, dateField('שעה (לא חובה)', t.remindAt, (v) => withTask(id, (x) => { x.remindAt = v; }, { render: false }), 'time'))) : null,
+        h('p', { class: 'hint' }, 'התזכורת מופיעה בראש המסך הראשי כשמגיע היום שלה. האפליקציה לא שולחת התראות לטלפון, כדי שלא יצא ממנה מידע.')),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'קטגוריה'),
         catChips(t.category, (cid) => withTask(id, (x, d) => { if (x.category !== cid) { x.category = cid; M.addLog(x, `קטגוריה: ${cid ? M.catName(d, cid) : 'ללא'}`); } }))),
       h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'חזרתיות'),
@@ -775,6 +843,7 @@ function subItem(t, list, n, index, depth) {
   const chipsInfo = [];
   if (st === 'cancelled') chipsInfo.push(h('span', { class: 'mini cancelled' }, 'בוטל'));
   if (n.category) chipsInfo.push(h('span', { class: 'mini' }, M.catName(S.data, n.category)));
+  if (n.remindDate && st === 'todo') chipsInfo.push(h('span', { class: 'mini' }, `תזכורת: ${dueText(n.remindDate, today())}`));
   if (n.due) chipsInfo.push(h('span', { class: `mini${n.due < today() && st === 'todo' ? ' late' : ''}` }, dueText(n.due, today())));
   if (n.note) chipsInfo.push(h('span', { class: 'mini' }, 'יש הערה'));
 
@@ -803,6 +872,15 @@ function subItem(t, list, n, index, depth) {
           h('button', { type: 'button', 'aria-pressed': String(st === s.id), onclick: () => setState(s.id) }, s.label)))),
       h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'הערה או סיבה'), note),
       dateField('תאריך יעד לתת-משימה', n.due, (v) => edit((x) => { x.due = v; }, null), 'date'),
+      h('div', { class: 'field' }, h('span', { class: 'lbl' }, n.remindDate ? `תזכורת: ${dueText(n.remindDate, today())}${n.remindAt ? ' ' + n.remindAt : ''}` : 'תזכורת לתת-משימה'),
+        remindChips(S.remindPick === nid ? 'date' : '', (v) => {
+          if (v === 'date') { S.remindPick = nid; render(); return; }
+          S.remindPick = null;
+          edit((x) => { x.remindDate = v ? M.addDays(today(), Number(v)) : ''; if (!v) x.remindAt = ''; }, null);
+        }),
+        (S.remindPick === nid || n.remindDate) ? h('div', { class: 'row wrap gap' },
+          h('div', { class: 'grow' }, dateField('תאריך התזכורת', n.remindDate, (v) => { S.remindPick = null; edit((x) => { x.remindDate = v; }, null); })),
+          h('div', { class: 'grow' }, dateField('שעה (לא חובה)', n.remindAt, (v) => edit((x) => { x.remindAt = v; }, null, { render: false }), 'time'))) : null),
       h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'קטגוריה'), catSel),
       childIn ? h('div', { class: 'field' }, childIn) : null,
       h('div', { class: 'row' },
@@ -846,14 +924,14 @@ function lockScreen() {
     else { pad.setLocked(false); pad.setMessage(''); }
   };
   pad = keypadView({
-    prompt: 'הקלד קוד גישה', submitLabel: 'פתח',
+    prompt: 'הקלד קוד גישה', submitLabel: 'פתח', autoLen: lenHint(),
     onSubmit: async (code) => {
       if (guard.waitSec() > 0) return null;
       guard.fail(); // count the attempt FIRST, so quitting mid-check does not skip it; cleared on success
       try {
         const data = await S.vault.unlock(code, M.validateData);
         if (document.hidden) { S.vault.lock(); render(); return null; } // app was backgrounded meanwhile
-        guard.ok();
+        guard.ok(); setLen(code.length);
         S.data = data; S.tab = 'home'; S.undo.clear(); lastActive = 0; restoreDraft();
         if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
         bumpIdle(); render();
@@ -871,6 +949,7 @@ function lockScreen() {
     },
   });
   wrap.append(pad.el, h('p', { class: 'hint' }, 'אין דרך לשחזר קוד שנשכח.'),
+    lenHint() ? h('button', { class: 'btn block gap', type: 'button', onclick: () => { clearLen(); render(); } }, 'הקוד שלי באורך אחר') : null,
     h('button', { class: 'btn block gap', type: 'button', onclick: () => wipeAll(true) }, 'שכחתי את הקוד / מחק ושחזר מגיבוי'));
   if (guard.waitSec() > 0) tick();
   return wrap;
@@ -881,7 +960,7 @@ function setupScreen(wrap) {
   const step = S.setupStep;
   const create = async (code, data) => {
     await S.vault.create(code, data);
-    S.hasVault = true; guard.ok(); S.data = M.validateData(data); S.tab = 'home'; lastActive = 0;
+    S.hasVault = true; guard.ok(); setLen(code.length); S.data = M.validateData(data); S.tab = 'home'; lastActive = 0;
     S.setupFirst = ''; S.setupStep = 'enter';
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     bumpIdle(); render();
@@ -890,6 +969,7 @@ function setupScreen(wrap) {
     prompt: step === 'enter' ? 'בחר קוד גישה (ספרות בלבד)' : 'הקלד את הקוד שוב לאימות',
     hint: step === 'enter' ? (restoring ? 'הקוד הזה יהיה למכשיר הזה. אחר כך תבחר את קובץ הגיבוי.' : 'לפחות 4 ספרות. מומלץ 8 ומעלה.') : null,
     submitLabel: step === 'enter' ? 'המשך' : (restoring ? 'המשך לבחירת קובץ' : 'צור כספת'),
+    autoLen: step === 'confirm' ? S.setupFirst.length : 0,
     onSubmit: async (code) => {
       if (step === 'enter') {
         if (code.length < 8 && !(await advisory(code.length))) return null;
@@ -923,6 +1003,7 @@ function flowScreen() {
   const prompts = { old: 'הקלד את הקוד הנוכחי', neu: 'בחר קוד חדש', confirm: 'הקלד את הקוד החדש שוב' };
   const pad = keypadView({
     prompt: prompts[f.step], submitLabel: f.step === 'confirm' ? 'החלף קוד' : 'המשך',
+    autoLen: f.step === 'old' ? lenHint() : f.step === 'confirm' ? f.neu.length : 0,
     hint: f.step === 'neu' ? 'לפחות 4 ספרות. מומלץ 8 ומעלה.' : null,
     onSubmit: async (code) => {
       if (f.step === 'old') {
@@ -936,7 +1017,7 @@ function flowScreen() {
       if (code !== f.neu) { f.step = 'neu'; f.neu = ''; render(); toast('הקודים לא זהים, נסה שוב', { bad: true }); return null; }
       try { await S.vault.changePasscode(f.old, f.neu, () => S.data); }
       catch (e) { S.flow = null; render(); toast('ההחלפה נכשלה', { bad: true }); return null; }
-      S.flow = null; render(); toast('קוד הגישה הוחלף');
+      setLen(f.neu.length); S.flow = null; render(); toast('קוד הגישה הוחלף');
       return null;
     },
   });

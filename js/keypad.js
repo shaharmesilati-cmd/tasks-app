@@ -5,7 +5,7 @@ let releaseCurrent = null;
 export function releaseKeypad() { if (releaseCurrent) { releaseCurrent(); releaseCurrent = null; } }
 
 // onSubmit(code) may return an error text (shown under the dots) or nothing.
-export function keypadView({ prompt, hint, submitLabel = 'אישור', minLen = 4, maxLen = 40, onSubmit }) {
+export function keypadView({ prompt, hint, submitLabel = 'אישור', minLen = 4, maxLen = 40, autoLen = 0, onSubmit }) {
   releaseKeypad();
   let code = '';
   let busy = false;
@@ -14,15 +14,16 @@ export function keypadView({ prompt, hint, submitLabel = 'אישור', minLen = 
   const dots = h('div', { class: 'dots', role: 'img', 'aria-label': '0 ספרות' });
   const msg = h('div', { class: 'err', role: 'alert' });
   const submit = h('button', { class: 'btn primary block', type: 'button', onclick: () => go() }, submitLabel);
+  if (autoLen) submit.hidden = true; // opens by itself on the last digit
   const keyBtns = [];
 
   const paint = () => {
     dots.replaceChildren(...Array.from(code, () => h('i')));
     dots.setAttribute('aria-label', `${code.length} ספרות`);
-    submit.disabled = busy || locked || code.length < minLen;
+    submit.disabled = busy || locked || code.length < (autoLen || minLen);
     keyBtns.forEach((b) => { b.disabled = busy || locked; });
   };
-  const press = (d) => { if (busy || locked || code.length >= maxLen) return; code += d; msg.textContent = ''; paint(); };
+  const press = (d) => { if (busy || locked || code.length >= maxLen) return; code += d; msg.textContent = ''; paint(); if (autoLen && code.length === autoLen) setTimeout(go, 90); };
   const back = () => { if (busy || locked) return; code = code.slice(0, -1); paint(); };
   async function go() {
     if (submit.disabled) return;
@@ -49,7 +50,7 @@ export function keypadView({ prompt, hint, submitLabel = 'אישור', minLen = 
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (/^[0-9]$/.test(e.key)) { e.preventDefault(); press(e.key); }
     else if (e.key === 'Backspace') { e.preventDefault(); back(); }
-    else if (e.key === 'Enter') { e.preventDefault(); go(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (!autoLen) go(); }
   };
   document.addEventListener('keydown', onKey);
   releaseCurrent = () => document.removeEventListener('keydown', onKey);

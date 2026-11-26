@@ -426,3 +426,18 @@ h2.sec .muted { font-weight: 600; margin-inline-start: auto; }
 
 .hero .bubble { background: var(--surface2); color: var(--text); }
 .top.big h1 { font-size: 2.1rem; font-weight: 800; }
+
+/* v5: organised home (folding groups, view switch, reminder pill) */
+.sechead { width: 100%; display: flex; align-items: center; gap: .5rem; min-height: 52px; padding: 0 .3rem; margin-top: .9rem; border: 0; background: none; color: var(--text); font-weight: 800; font-size: 1.05rem; text-align: start; }
+.sechead svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.sechead.danger, .sechead.danger svg { color: var(--danger); }
+.sechead .st { flex: none; }
+.sechead .pv { flex: 1; min-width: 0; color: var(--muted); font-weight: 500; font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sechead .count { margin-inline-start: auto; font-size: .85rem; font-weight: 700; color: var(--muted); background: var(--surface2); border-radius: 999px; padding: 0 .6rem; min-width: 1.8rem; text-align: center; flex: none; }
+.sechead.danger .count { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+.fsec > ul.list { margin-top: .1rem; }
+.linkrow.more { margin-top: .5rem; min-height: 46px; }
+.viewseg { display: flex; gap: 2px; background: var(--surface2); border-radius: 12px; padding: 3px; margin: .2rem 0 .5rem; }
+.viewseg button { flex: 1; min-height: 40px; border: 0; background: transparent; border-radius: 10px; font-weight: 700; font-size: .85rem; color: var(--muted); }
+.viewseg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.pill { align-self: center; margin-inline-end: .7rem; min-height: 40px; padding: 0 .9rem; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); font-weight: 700; color: var(--accent); }

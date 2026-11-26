@@ -54,12 +54,12 @@ const isTimeStr = (s) => typeof s === 'string' && /^\d{2}:\d{2}$/.test(s);
 
 // ---------- creating ----------
 export function emptyData() {
-  return { v: 1, settings: { autoLockSec: 60, theme: 'auto' }, categories: [], tasks: [] };
+  return { v: 1, settings: { autoLockSec: 60, theme: 'auto', view: 'time' }, categories: [], tasks: [] };
 }
 
 export function newTask(title, now = new Date(), extra = {}) {
   const t = {
-    id: uid(), title: String(title).trim(), desc: '', due: '', remindAt: '',
+    id: uid(), title: String(title).trim(), desc: '', due: '', remindDate: '', remindAt: '',
     priority: 1, tags: [], category: '', status: 'todo', repeat: 'none',
     subtasks: [], log: [], archived: false,
     createdAt: now.toISOString(), updatedAt: now.toISOString(), completedAt: '',
@@ -70,7 +70,7 @@ export function newTask(title, now = new Date(), extra = {}) {
 }
 
 export function newSub(title, extra = {}) {
-  return { id: uid(), title: String(title).trim(), state: 'todo', due: '', note: '', category: '', children: [], ...extra };
+  return { id: uid(), title: String(title).trim(), state: 'todo', due: '', remindDate: '', remindAt: '', note: '', category: '', children: [], ...extra };
 }
 
 export function addLog(task, msg, now = new Date()) {
@@ -179,7 +179,7 @@ export function completeTask(task, now = new Date()) {
     const todayS = dateStr(now);
     task.due = nextDue(task.due, task.repeat);
     for (let i = 0; i < 4000 && task.due < todayS; i++) task.due = nextDue(task.due, task.repeat); // skip missed occurrences
-    task.status = 'todo'; task.completedAt = '';
+    task.status = 'todo'; task.completedAt = ''; task.remindDate = '';
     resetSubs(task.subtasks);
     addLog(task, `משימה חוזרת: מופע הושלם, תאריך הבא ${task.due} (היה ${prev})`, now);
     return { completedCopy: copy, nextDue: task.due };
@@ -230,14 +230,33 @@ export function allTags(tasks) {
 }
 
 // The numbers shown at the top of the home screen. Always built from the same list as the tasks below them.
+// A reminder is separate from the due date: "remind me tomorrow" about a task that is due in two weeks.
+export function isReminderDue(t, today) { return isOpen(t) && !!t.remindDate && t.remindDate <= today; }
+
+// A sub-task with its own date or reminder is a task in its own right: it gets its own row in the lists.
+export function subEntries(tasks) {
+  const out = [];
+  const walk = (t, list) => list.forEach((n) => {
+    if (nodeState(n) === 'todo' && (n.due || n.remindDate)) {
+      out.push({ id: t.id, nodeId: n.id, isSub: true, parentTitle: t.title, title: n.title, due: n.due || '', remindDate: n.remindDate || '', remindAt: n.remindAt || '',
+        priority: t.priority, category: n.category || t.category, status: 'todo', tags: [], repeat: 'none', subtasks: [], archived: false });
+    }
+    walk(t, n.children || []);
+  });
+  tasks.filter(isOpen).forEach((t) => walk(t, t.subtasks || []));
+  return out;
+}
+
 export function summary(tasks, today) {
   const open = tasks.filter(isOpen);
   const end = addDays(today, 7);
+  const ent = open.concat(subEntries(tasks));
+  const g = groupsOf(ent, today, true);
   return {
     open: open.length,
-    overdue: open.filter((t) => t.due && t.due < today).length,
-    today: open.filter((t) => t.due === today).length,
-    week: open.filter((t) => t.due > today && t.due <= end).length,
+    overdue: g.overdue.length,
+    today: g.today.length + g.remind.length,
+    week: ent.filter((t) => t.due > today && t.due <= end).length,
     nodate: open.filter((t) => !t.due).length,
     closed: tasks.filter(isClosed).length,
   };
@@ -245,19 +264,28 @@ export function summary(tasks, today) {
 
 const subHasCat = (list, cat) => list.some((n) => n.category === cat || subHasCat(n.children || [], cat));
 const inCat = (t, cat) => !cat || (cat === 'none' ? !t.category : (t.category === cat || subHasCat(t.subtasks || [], cat)));
-export const SECTION_TITLES = { overdue: 'באיחור', today: 'היום', soon: 'ב-7 הימים הקרובים', later: 'מאוחר יותר', nodate: 'ללא מועד' };
+export const SECTION_TITLES = { overdue: 'באיחור', remind: 'תזכורות', today: 'היום', soon: 'ב-7 הימים הקרובים', later: 'מאוחר יותר', nodate: 'ללא מועד' };
 // All open tasks, grouped by when they are due. scope: all | overdue | today | week
-export function homeSections(tasks, today, { scope = 'all', cat = '' } = {}) {
+function groupsOf(open, today, pull) {
   const end = addDays(today, 7);
-  const open = tasks.filter((t) => isOpen(t) && inCat(t, cat));
-  const groups = {
+  const remind = pull ? open.filter((t) => isReminderDue(t, today) && !(t.due && t.due <= today)).sort(byDue) : [];
+  const inRemind = new Set(remind);
+  const rest = open.filter((t) => !inRemind.has(t));
+  return {
     overdue: open.filter((t) => t.due && t.due < today).sort(byDue),
+    remind,
     today: open.filter((t) => t.due === today).sort(byDue),
-    soon: open.filter((t) => t.due > today && t.due <= end).sort(byDue),
-    later: open.filter((t) => t.due > end).sort(byDue),
-    nodate: open.filter((t) => !t.due).sort(byPrio),
+    soon: rest.filter((t) => t.due > today && t.due <= end).sort(byDue),
+    later: rest.filter((t) => t.due > end).sort(byDue),
+    nodate: rest.filter((t) => !t.due).sort(byPrio),
   };
-  const keys = scope === 'overdue' ? ['overdue'] : scope === 'today' ? ['today'] : scope === 'week' ? ['soon'] : ['overdue', 'today', 'soon', 'later', 'nodate'];
+}
+
+export function homeSections(tasks, today, { scope = 'all', cat = '' } = {}) {
+  const open = tasks.filter((t) => isOpen(t) && inCat(t, cat)).concat(subEntries(tasks).filter((t) => inCat(t, cat)));
+  const groups = groupsOf(open, today, scope === 'all' || scope === 'today');
+  if (scope === 'week') groups.soon = open.filter((t) => t.due > today && t.due <= addDays(today, 7)).sort(byDue);
+  const keys = scope === 'overdue' ? ['overdue'] : scope === 'today' ? ['remind', 'today'] : scope === 'week' ? ['soon'] : ['overdue', 'remind', 'today', 'soon', 'later', 'nodate'];
   return keys.map((k) => ({ id: k, title: SECTION_TITLES[k], tasks: groups[k] })).filter((s) => s.tasks.length);
 }
 
@@ -317,7 +345,8 @@ function cleanSub(n, depth, catIds) {
   const state = SUB_IDS.includes(n.state) ? n.state : (n.done ? 'done' : 'todo'); // older files used a plain done flag
   const o = {
     id: str(n.id, 40) || uid(), title: str(n.title, 300), state,
-    due: isDateStr(n.due) ? n.due : '', note: str(n.note, 5000),
+    due: isDateStr(n.due) ? n.due : '', remindDate: isDateStr(n.remindDate) ? n.remindDate : '', remindAt: isTimeStr(n.remindAt) ? n.remindAt : '',
+    note: str(n.note, 5000),
     category: catIds.has(n.category) ? n.category : '', children: [],
   };
   if (depth < 2 && Array.isArray(n.children)) o.children = n.children.map((c) => cleanSub(c, depth + 1, catIds)).filter(Boolean);
@@ -330,6 +359,7 @@ export function validateData(d) {
   const s = d.settings || {};
   out.settings.autoLockSec = [15, 30, 60, 120, 300].includes(s.autoLockSec) ? s.autoLockSec : 60;
   out.settings.theme = ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : 'auto';
+  out.settings.view = ['time', 'cat', 'prio'].includes(s.view) ? s.view : 'time';
   out.settings.lastExport = isDateStr(s.lastExport) ? s.lastExport : '';
   const catIds = new Set();
   if (Array.isArray(d.categories)) {
@@ -351,7 +381,9 @@ export function validateData(d) {
     const status = STATUSES.some((x) => x.id === t.status) ? t.status : 'todo';
     out.tasks.push({
       id, title: str(t.title, 300), desc: str(t.desc, 20000),
-      due: isDateStr(t.due) ? t.due : '', remindAt: isTimeStr(t.remindAt) ? t.remindAt : '',
+      due: isDateStr(t.due) ? t.due : '',
+      remindDate: isDateStr(t.remindDate) ? t.remindDate : (isTimeStr(t.remindAt) && isDateStr(t.due) ? t.due : ''),
+      remindAt: isTimeStr(t.remindAt) ? t.remindAt : '',
       priority: intIn(t.priority, 0, 3, 1),
       tags: Array.isArray(t.tags) ? [...new Set(t.tags.map(cleanTag).filter(Boolean))].slice(0, 30) : [],
       category: catIds.has(t.category) ? t.category : '',

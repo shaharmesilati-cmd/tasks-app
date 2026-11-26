@@ -400,3 +400,12 @@ test('sub-task with its own date is a row of its own; done/validate keep fields'
   M.setNodeState(t.subtasks[0], 'done');
   assert.equal(M.subEntries([t]).length, 0);
 });
+
+test('calendar export masks titles and never leaks the full title', () => {
+  assert.equal(M.maskTitle('משימת אמצעי לחימה'), 'מש*** אמ*** לח***');
+  const t = M.newTask('אמצעי לחימה סודי', new Date('2026-11-01'), { remindDate: '2026-12-01', remindAt: '09:45' });
+  const m = M.buildIcs([t], new Date('2026-11-26'), 'masked');
+  assert.ok(m.text.includes('DTSTART:20261201T094500') && !m.text.includes('סודי') && m.count === 1);
+  const g = M.buildIcs([t], new Date('2026-11-26'), 'generic');
+  assert.ok(!g.text.includes('אמ') && g.text.includes('VALARM'));
+});

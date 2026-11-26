@@ -441,3 +441,14 @@ h2.sec .muted { font-weight: 600; margin-inline-start: auto; }
 .viewseg button { flex: 1; min-height: 40px; border: 0; background: transparent; border-radius: 10px; font-weight: 700; font-size: .85rem; color: var(--muted); }
 .viewseg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .pill { align-self: center; margin-inline-end: .7rem; min-height: 40px; padding: 0 .9rem; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); font-weight: 700; color: var(--accent); }
+
+/* v6: minimal home, big buttons that open lists */
+.tiles.menu { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; background: none; box-shadow: none; padding: 0; margin: .4rem 0 1rem; }
+.tiles.menu .tile { min-height: 132px; border: 0; border-radius: 22px; background: var(--surface); box-shadow: var(--shadow); gap: .35rem; }
+.tiles.menu .tile svg { width: 26px; height: 26px; color: var(--muted); }
+.tiles.menu .tile .num { font-size: 2.4rem; }
+.tiles.menu .tile .lbl { font-size: .95rem; color: var(--text); }
+.tiles.menu .tile.late svg { color: var(--danger); }
+.tiles.menu .tile:last-child:nth-child(odd) { grid-column: 1 / -1; min-height: 96px; }
+.scopehead { display: flex; align-items: center; gap: .4rem; margin: .2rem 0 .4rem; }
+.scopehead h2 { margin: 0; font-size: 1.5rem; font-weight: 800; }

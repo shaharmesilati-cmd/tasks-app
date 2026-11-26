@@ -5,6 +5,15 @@ from playwright.sync_api import sync_playwright
 BASE = "http://127.0.0.1:8765/index.html"
 SECRET = "סוד-ביותר-XYZ"
 results = []
+def show_all(page):
+    if page.locator(".tiles.menu").count():
+        page.locator(".tile").filter(has_text="כל המשימות").click(); page.wait_for_selector(".scopehead")
+
+def to_menu(page):
+    if page.locator(".scopehead").count():
+        page.get_by_label("חזרה למסך הראשי").click(); page.wait_for_selector(".tiles.menu")
+
+
 def check(name, cond, extra=""):
     results.append((name, bool(cond)))
     print(("PASS " if cond else "FAIL ") + name + (f"  [{extra}]" if extra and not cond else ""))
@@ -57,7 +66,7 @@ with sync_playwright() as p:
     digits(page, "2580")
     check("no-recovery warning shown", "אין שחזור" in page.get_by_role("dialog").inner_text())
     page.get_by_role("button", name="הבנתי, המשך").click()
-    page.wait_for_selector(".tiles", timeout=20000)
+    page.wait_for_selector(".nav", timeout=20000)
     check("home = all tasks screen", page.locator("h1").first.inner_text() == "המשימות שלי")
     check("empty home explains how to start", "עוד אין משימות" in page.content())
     page.screenshot(path="/tmp/shots/11-home-empty.png")
@@ -68,13 +77,16 @@ with sync_playwright() as p:
     page.screenshot(path="/tmp/shots/12-new-form.png", full_page=True)
     page.fill("#newTitle", SECRET); page.keyboard.press("Enter")   # one-step quick add (title + Enter)
     page.wait_for_selector(".tiles")
+    check("home is only big buttons: 5 tiles, no task rows", page.locator(".tile").count() == 5 and page.locator("li.card").count() == 0)
+    show_all(page)
     check("quick add (title + Enter) lands in 'ללא מועד'", page.locator(".sechead").filter(has_text="ללא מועד").count() == 1)
-    check("honest note when nothing is due today", "אין משימות מתוזמנות להיום" in page.locator(".notice").inner_text() and "1 משימות פתוחות" in page.locator(".notice").inner_text())
     add_task(page, "תיקון ציוד", when="היום", prio="דחוף", new_cat="הנדסה ימית")
     add_task(page, "הכנת דוח", when="מחר", cat="הנדסה ימית")
     add_task(page, "פגישה עתידית", when="בעוד שבוע")
+    to_menu(page)
     tiles = page.locator(".tile .num").all_inner_texts()
-    check("tiles: overdue 0, today 1, 7-days 2, open 4", tiles == ["0", "1", "2", "4"], str(tiles))
+    check("tiles: overdue 0, today 1, 7-days 2, open 4, sub-tasks 0", tiles == ["0", "1", "2", "4", "0"], str(tiles))
+    show_all(page)
     check("ALL open tasks visible on home", page.locator("li.card").count() == 4)
     check("sections shown: today / soon / no-date", all(page.locator(".sechead").filter(has_text=t).count() == 1 for t in ["היום", "ב-7 הימים הקרובים", "ללא מועד"]))
     page.screenshot(path="/tmp/shots/13-home-full.png", full_page=True)
@@ -84,15 +96,17 @@ with sync_playwright() as p:
     page.wait_for_selector("#toast >> text=הושלמה ועברה")
     check("toast with undo after completing", page.locator("#toast .tbtn").count() == 1)
     check("completed task left open lists", page.locator("li.card").filter(has_text="תיקון ציוד").count() == 0)
+    to_menu(page)
     check("tiles updated (today 0, open 3)", page.locator(".tile .num").all_inner_texts()[1] == "0" and page.locator(".tile .num").all_inner_texts()[3] == "3")
-    check("home links to completed tasks", "הושלמו ובוטלו: 1" in page.locator(".linkrow").inner_text())
     nav(page, 2)
     check("completed task is listed in 'הושלמו'", page.locator("li.card").filter(has_text="תיקון ציוד").count() == 1)
     page.screenshot(path="/tmp/shots/14-closed.png")
     page.get_by_role("button", name="פתח מחדש: תיקון ציוד").click()
     check("reopening from 'הושלמו' works", page.locator("li.card").count() == 0)
     nav(page, 0)
-    check("reopened task back on home under today", page.locator("li.card").filter(has_text="תיקון ציוד").count() == 1 and page.locator(".tile .num").all_inner_texts()[1] == "1")
+    check("reopened task counted under today", page.locator(".tile .num").all_inner_texts()[1] == "1")
+    show_all(page)
+    check("reopened task back on home", page.locator("li.card").filter(has_text="תיקון ציוד").count() == 1)
     page.get_by_role("button", name="סמן כהושלם: תיקון ציוד").click(); page.wait_for_selector("#toast >> text=הושלמה ועברה"); page.locator("#toast .tbtn").click()
     check("undo from toast restores it", page.locator("li.card").filter(has_text="תיקון ציוד").count() == 1)
 
@@ -103,13 +117,13 @@ with sync_playwright() as p:
         page.fill("#subAdd", s); page.keyboard.press("Enter"); page.wait_for_selector("#subAdd:focus")
     page.get_by_label(re.compile("^לא בוצע: שלב א")).click()
     page.get_by_label("פרטי תת-משימה").nth(1).click()
-    page.get_by_role("group", name="מצב תת-משימה").get_by_role("button", name="בוטל").click()
+    page.get_by_role("group", name="מצב תת-משימה").nth(0).get_by_role("button", name="בוטל").click()
     page.get_by_label("הערה או סיבה").first.fill("הספק ביטל את ההזמנה"); page.get_by_label("הערה או סיבה").first.blur()
     hdr = page.locator("h2.sec").filter(has_text="תתי-משימות").inner_text()
     check("progress counts cancelled separately", "1 מתוך 2 הושלמו" in hdr and "1 בוטלו" in hdr, hdr)
     check("cancelled sub-task stays visible, marked 'בוטל'", page.locator("li.sub.st-cancelled").count() == 1 and page.locator("li.sub.st-cancelled .mini.cancelled").count() == 1)
     check("reason is kept", page.get_by_label("הערה או סיבה").first.input_value() == "הספק ביטל את ההזמנה")
-    page.get_by_label("קטגוריה של תת-משימה").select_option(label="הנדסה ימית")
+    page.get_by_label("קטגוריה של תת-משימה").first.select_option(label="הנדסה ימית")
     check("sub-task can have a category", page.locator("li.sub .mini", has_text="הנדסה ימית").count() == 1)
     page.screenshot(path="/tmp/shots/15-detail.png", full_page=True)
     page.get_by_role("button", name="הושלם", exact=True).click()
@@ -137,7 +151,7 @@ with sync_playwright() as p:
     page.fill("#newTitle", "בדיקת מחסן"); page.get_by_role("button", name="הוסף משימה").click()
     check("task appears inside its category", page.locator("li.card").filter(has_text="בדיקת מחסן").count() == 1)
     page.get_by_label("חזרה לקטגוריות").click()
-    nav(page, 0)
+    nav(page, 0); show_all(page)
     page.get_by_role("button", name='אמל"ח', exact=True).click()
     check("home filter by category", page.locator("li.card").count() == 1)
     page.get_by_role("button", name="הכול", exact=True).click()
@@ -164,6 +178,7 @@ with sync_playwright() as p:
     page.evaluate("localStorage.removeItem('st.guard')"); page.reload()
     digits(page, "2580")
     page.wait_for_selector(".tiles", timeout=20000)
+    show_all(page)
     check("correct code restores everything", page.locator("li.card").count() >= 4 and "הנדסה ימית" in page.content())
 
     # background => lock
@@ -178,11 +193,13 @@ with sync_playwright() as p:
     page.evaluate("() => { Object.defineProperty(document,'hidden',{configurable:true,get:()=>false}); document.dispatchEvent(new Event('visibilitychange')); }")
     digits(page, "2580"); page.wait_for_selector("#newTitle", timeout=20000)
     check("unsent draft survives a quick lock/unlock", page.input_value("#newTitle") == "טיוטה שלא נשלחה")
-    page.get_by_role("button", name="ביטול", exact=True).click(); page.wait_for_selector(".tiles")
+    page.get_by_role("button", name="ביטול", exact=True).click(); page.wait_for_selector(".nav")
+    show_all(page)
     page.get_by_role("button", name="סמן כהושלם: פגישה עתידית").click(); page.wait_for_selector("#toast >> text=הושלמה ועברה")
     page.locator("button.open").filter(has_text="הכנת דוח").click()
     page.fill("input[aria-label='כותרת']", "הכנת דוח 2"); page.keyboard.press("Tab"); page.get_by_label("חזרה").click()
     page.locator("#toast .tbtn").click()
+    show_all(page)
     check("stale toast undo does not undo a different action", page.locator("li.card").filter(has_text="הכנת דוח 2").count() == 1 and page.locator("li.card").filter(has_text="פגישה עתידית").count() == 0)
     page.locator("#undoBtn").click(); page.locator("#undoBtn").click()
 
@@ -198,6 +215,7 @@ with sync_playwright() as p:
     digits(page, "25800000"); page.wait_for_timeout(2500)
     check("old code no longer works", page.locator(".keys").count() == 1)
     digits(page, "13572468"); page.wait_for_selector(".tiles", timeout=20000)
+    show_all(page)
     check("new 8-digit code works, data intact", page.locator("li.card").count() >= 4)
 
     # ---------- export / import ----------
@@ -218,6 +236,7 @@ with sync_playwright() as p:
     page.get_by_label("סיסמה", exact=True).fill("export-pass-1234"); page.get_by_role("button", name="פתח", exact=True).click()
     page.get_by_role("button", name="החלף", exact=True).click()
     nav(page, 0)
+    show_all(page)
     check("import restored tasks AND categories", page.get_by_text("תוספת אחרי הגיבוי").count() == 0 and page.locator("li.card").count() >= 4)
     nav(page, 1)
     check("categories came back with the import", "הנדסה ימית" in page.content())

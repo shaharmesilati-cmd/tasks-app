@@ -13,7 +13,7 @@ const S = {
   data: null,
   undo: new M.UndoStack(30),
   hasVault: false, storageError: false,
-  tab: 'home', scope: 'all', cat: '', catOpen: null, closedKind: 'done',
+  tab: 'home', scope: 'menu', cat: '', catOpen: null, closedKind: 'done',
   openId: null, newForm: null, expanded: new Set(), q: '',
   setup: 'create', setupStep: 'enter', setupFirst: '',
   flow: null, dismiss: null, fold: new Map(), more: new Set(), remindPick: null, draft: null,
@@ -135,7 +135,7 @@ function lock() {
   S.undo.clear();
   // Keep an unsent new-task form in memory only for 2 minutes, so a quick app switch does not lose typing.
   S.draft = S.newForm && S.newForm.title.trim() + S.newForm.desc.trim() ? { f: S.newForm, t: Date.now() } : null;
-  S.q = ''; S.openId = null; S.newForm = null; S.flow = null; S.catOpen = null; S.cat = ''; S.scope = 'all';
+  S.q = ''; S.openId = null; S.newForm = null; S.flow = null; S.catOpen = null; S.cat = ''; S.scope = 'menu';
   S.expanded.clear(); S.fold.clear(); S.more.clear(); S.remindPick = null; S.setupFirst = ''; S.setupStep = 'enter';
   $('dialogRoot').replaceChildren();
   $('toast').replaceChildren();
@@ -322,55 +322,59 @@ function navBar(now) {
   const late = M.overdue(S.data.tasks, now).length;
   return h('nav', { class: 'nav', 'aria-label': 'ניווט ראשי' }, NAV.map(([id, label, ic]) =>
     h('button', { type: 'button', 'aria-current': S.tab === id && !S.catOpen ? 'page' : (S.tab === id ? 'true' : null),
-      onclick: () => { S.tab = id; S.q = ''; S.catOpen = null; $('toast').replaceChildren(); render(); window.scrollTo(0, 0); } },
+      onclick: () => { S.tab = id; S.q = ''; S.catOpen = null; if (id === 'home') S.scope = 'menu'; $('toast').replaceChildren(); render(); window.scrollTo(0, 0); } },
       icon(ic), label,
       id === 'home' && late ? h('span', { class: 'badge', 'aria-label': `${late} באיחור` }, String(late)) : null)));
 }
 
 // ---------- home: ALL open tasks, with today's numbers on top ----------
+const SCOPE_TITLES = { overdue: 'באיחור', today: 'היום', week: '7 הימים הקרובים', all: 'כל המשימות', subs: 'תתי-משימות' };
 function homeScreen(now) {
   const d = S.data;
   const sm = M.summary(d.tasks, now);
-  const tile = (id, label, n, cls = '') => h('button', { class: `tile ${cls}`, type: 'button', 'aria-pressed': String(S.scope === id),
-    onclick: () => { S.scope = S.scope === id ? 'all' : id; render(); } },
-    h('span', { class: 'num' }, String(n)), h('span', { class: 'lbl' }, label));
-  const tiles = h('div', { class: 'tiles', role: 'group', 'aria-label': 'סינון לפי זמן' },
-    tile('overdue', 'באיחור', sm.overdue, sm.overdue ? 'late' : ''), tile('today', 'היום', sm.today), tile('week', '7 ימים', sm.week), tile('all', 'כל הפתוחות', sm.open));
-  const chips = d.categories.length ? h('div', { class: 'chips', role: 'group', 'aria-label': 'קטגוריה' },
-    [['', 'הכול'], ...d.categories.map((c) => [c.id, c.name]), ['none', 'ללא קטגוריה']].map(([id, l]) =>
-      h('button', { class: 'chip', type: 'button', 'aria-pressed': String(S.cat === id), onclick: () => { S.cat = id; render(); } }, l))) : null;
-  const timeSections = M.homeSections(d.tasks, now, { scope: S.scope, cat: S.cat });
-  const view = d.settings.view || 'time';
-  const sections = view === 'time' ? timeSections : regroup(timeSections, view);
-  const crowded = sm.open > CROWDED && S.scope === 'all' && !S.cat;
-  const viewSwitch = sm.open > 4 ? h('div', { class: 'viewseg', role: 'group', 'aria-label': 'תצוגה' }, VIEWS.map(([v, l]) =>
-    h('button', { type: 'button', 'aria-pressed': String(view === v), onclick: () => { commit((x) => { x.settings.view = v; }); } }, l))) : null;
+  const subsN = M.subEntries(d.tasks, true).length;
+  const go = (id) => { S.scope = id; S.cat = ''; render(); window.scrollTo(0, 0); };
+  const tile = (id, label, n, ic, cls = '') => h('button', { class: `tile ${cls}`, type: 'button', 'aria-label': `${label}: ${n}`, onclick: () => go(id) },
+    icon(ic), h('span', { class: 'num' }, String(n)), h('span', { class: 'lbl' }, label));
   let backup = null;
   if (d.tasks.length >= 3) {
     const last = d.settings.lastExport;
     const days = last ? M.diffDays(now, last) : null;
     if (days === null || days >= 14) {
       backup = h('button', { class: 'notice backup', type: 'button', onclick: () => { S.tab = 'settings'; render(); window.scrollTo(0, 0); } },
-        icon('download-simple'), days === null ? 'עוד לא יצרת גיבוי מוצפן. לחץ כאן, כדי שהמשימות לא ילכו לאיבוד.' : `הגיבוי האחרון לפני ${days} ימים. לחץ ליצירת גיבוי חדש.`);
+        icon('download-simple'), days === null ? 'אין גיבוי עדיין. לחץ ליצירה.' : `גיבוי אחרון לפני ${days} ימים.`);
     }
   }
-  let note = null;
-  if (S.scope === 'all' && !S.cat && sm.today === 0 && sm.overdue === 0 && sm.open > 0) {
-    note = h('p', { class: 'notice', role: 'status' }, `אין משימות מתוזמנות להיום, אבל יש ${sm.open} משימות פתוחות אחרות.`);
+  if (S.scope === 'menu') {
+    if (!d.tasks.length) {
+      return h('main', { class: 'main' }, h('div', { class: 'hero' }, h('div', { class: 'bubble' }, icon('list-checks')), h('h2', null, 'עוד אין משימות'),
+        h('button', { class: 'btn primary', type: 'button', onclick: () => openNew('') }, icon('plus'), 'הוסף משימה')),
+        fab('משימה חדשה', () => openNew('')));
+    }
+    return h('main', { class: 'main' },
+      h('div', { class: 'tiles menu' },
+        tile('overdue', 'באיחור', sm.overdue, 'warning', sm.overdue ? 'late' : ''), tile('today', 'היום', sm.today, 'sun'),
+        tile('week', '7 ימים', sm.week, 'calendar-dots'), tile('all', 'כל המשימות', sm.open, 'list-checks'),
+        tile('subs', 'תתי-משימות', subsN, 'list-checks')),
+      backup, fab('משימה חדשה', () => openNew('')));
   }
-  let empty = null;
-  if (!sections.length) {
-    empty = !d.tasks.length
-      ? h('div', { class: 'hero' }, h('div', { class: 'bubble' }, icon('list-checks')), h('h2', null, 'עוד אין משימות'),
-        h('p', null, 'הוסף את הראשונה, ואפשר לפרק אותה לשלבים.'),
-        h('button', { class: 'btn primary', type: 'button', onclick: () => openNew('') }, icon('plus'), 'הוסף משימה'))
-      : h('div', { class: 'empty' }, h('p', null, S.scope === 'all' && !S.cat ? 'אין משימות פתוחות.' : 'אין משימות במסנן הזה.'),
-        S.scope !== 'all' || S.cat ? h('button', { class: 'btn', type: 'button', onclick: () => { S.scope = 'all'; S.cat = ''; render(); } }, 'הצג את כל הפתוחות') : null);
-  }
-  return h('main', { class: 'main' }, tiles, backup, viewSwitch, chips, note,
+  const chips = d.categories.length ? h('div', { class: 'chips', role: 'group', 'aria-label': 'קטגוריה' },
+    [['', 'הכול'], ...d.categories.map((c) => [c.id, c.name]), ['none', 'ללא קטגוריה']].map(([id, l]) =>
+      h('button', { class: 'chip', type: 'button', 'aria-pressed': String(S.cat === id), onclick: () => { S.cat = id; render(); } }, l))) : null;
+  const timeSections = M.homeSections(d.tasks, now, { scope: S.scope, cat: S.cat });
+  const view = d.settings.view || 'time';
+  const grouped = S.scope === 'all' || S.scope === 'subs';
+  const sections = view === 'time' || !grouped ? timeSections : regroup(timeSections, view);
+  const crowded = sm.open > CROWDED && S.scope === 'all' && !S.cat;
+  const viewSwitch = grouped && sm.open > 4 ? h('div', { class: 'viewseg', role: 'group', 'aria-label': 'תצוגה' }, VIEWS.map(([v, l]) =>
+    h('button', { type: 'button', 'aria-pressed': String(view === v), onclick: () => { commit((x) => { x.settings.view = v; }); } }, l))) : null;
+  const empty = !sections.length ? h('div', { class: 'empty' }, h('p', null, 'אין כאן משימות.')) : null;
+  return h('main', { class: 'main' },
+    h('div', { class: 'scopehead' },
+      h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'חזרה למסך הראשי', onclick: () => go('menu') }, icon('caret-right')),
+      h('h2', null, SCOPE_TITLES[S.scope])),
+    viewSwitch, chips,
     sections.map((s, i) => foldSection(s, now, { crowded, forceOpen: S.scope !== 'all' || !!S.cat, idx: i })), empty,
-    sm.closed ? h('button', { class: 'linkrow', type: 'button', onclick: () => { S.tab = 'closed'; render(); window.scrollTo(0, 0); } },
-      icon('check-circle'), `הושלמו ובוטלו: ${sm.closed}. הצג`) : null,
     fab('משימה חדשה', () => openNew(S.cat && S.cat !== 'none' ? S.cat : '')));
 }
 
@@ -488,6 +492,10 @@ function settingsScreen() {
     h('h2', { class: 'sec' }, 'גיבוי ידני'),
     h('p', { class: 'hint' }, 'הגיבוי נשמר לקובץ מוצפן עם סיסמה נפרדת, רק כשאתה מבקש. שום דבר לא נשלח לשום מקום.'),
     h('button', { class: 'btn block', type: 'button', onclick: doExport }, icon('download-simple'), 'ייצוא לקובץ מוצפן'),
+    h('h2', { class: 'sec' }, 'התראות ביומן'),
+    h('p', { class: 'hint' }, 'האפליקציה לא יכולה להתריע בעצמה. אפשר לייצא את התזכורות ליומן של האייפון, והוא יתריע בשעה שבחרת. הכותרת מוסתרת או כללית.'),
+    h('button', { class: 'btn block', type: 'button', onclick: () => exportCalendar('masked') }, icon('calendar-blank'), 'ייצוא ליומן, כותרת מוסתרת'),
+    h('button', { class: 'btn block gap', type: 'button', onclick: () => exportCalendar('generic') }, icon('calendar-blank'), 'ייצוא ליומן, כותרת כללית'),
     h('button', { class: 'btn block gap', type: 'button', onclick: () => pickImportFile((txt) => importInto(txt)) }, icon('upload-simple'), 'ייבוא מקובץ גיבוי'),
     persistedNote,
     h('h2', { class: 'sec' }, 'מחיקה'),
@@ -567,6 +575,23 @@ async function doExport() {
     commit((d) => { d.settings.lastExport = today(); }, { render: false });
     toast('נוצר קובץ גיבוי מוצפן');
   } catch (e) { toast('הייצוא נכשל', { bad: true }); }
+}
+async function exportCalendar(mode) {
+  const sample = M.maskTitle('משימת אמצעי לחימה');
+  const ok = await confirmBox({
+    title: 'ייצוא תזכורות ליומן',
+    text: `ייווצר קובץ לא מוצפן עם התזכורות העתידיות. ביומן של האייפון תופיע ${mode === 'masked' ? `כותרת מוסתרת, למשל: ${sample}` : 'הכותרת "תזכורת מהאפליקציה" בלבד'}. התאריך והשעה יופיעו גלויים, ואת הקובץ והאירועים צריך למחוק ידנית אחר כך. ההתראה תקפוץ בשעה שבחרת (ללא שעה: 09:00). להמשיך?`,
+    ok: 'צור קובץ',
+  });
+  if (!ok) return;
+  const r = M.buildIcs(S.data.tasks, new Date(), mode);
+  if (!r.count) { toast('אין תזכורות עתידיות לייצוא', { bad: true }); return; }
+  const blob = new Blob([r.text], { type: 'text/calendar' });
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: `reminders-${today()}.ics` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  toast(`נוצר קובץ עם ${r.count} תזכורות`);
 }
 function pickImportFile(cb) {
   const inp = h('input', { type: 'file', class: 'sr', 'aria-hidden': 'true', tabindex: '-1' });
@@ -735,7 +760,8 @@ function detailScreen(id) {
   const subInput = h('input', { type: 'text', id: 'subAdd', 'aria-label': 'תת-משימה חדשה', placeholder: 'תת-משימה חדשה ו-Enter', ...NOASSIST, maxlength: '300' });
   const addSub = () => {
     const v = subInput.value.trim(); if (!v) return;
-    withTask(id, (x) => { x.subtasks.push(M.newSub(v)); M.addLog(x, `נוספה תת-משימה: ${v}`); });
+    const ns = M.newSub(v); S.expanded.clear(); S.expanded.add(ns.id);
+    withTask(id, (x) => { x.subtasks.push(ns); M.addLog(x, `נוספה תת-משימה: ${v}`); });
     setTimeout(() => { const el = $('subAdd'); if (el) el.focus(); }, 0);
   };
   subInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addSub(); } });
@@ -842,6 +868,7 @@ function subItem(t, list, n, index, depth) {
 
   const chipsInfo = [];
   if (st === 'cancelled') chipsInfo.push(h('span', { class: 'mini cancelled' }, 'בוטל'));
+  if (st === 'todo' && (n.priority ?? 1) >= 2) chipsInfo.push(h('span', { class: `mini p${n.priority}` }, M.PRIORITIES[n.priority]));
   if (n.category) chipsInfo.push(h('span', { class: 'mini' }, M.catName(S.data, n.category)));
   if (n.remindDate && st === 'todo') chipsInfo.push(h('span', { class: 'mini' }, `תזכורת: ${dueText(n.remindDate, today())}`));
   if (n.due) chipsInfo.push(h('span', { class: `mini${n.due < today() && st === 'todo' ? ' late' : ''}` }, dueText(n.due, today())));
@@ -857,7 +884,7 @@ function subItem(t, list, n, index, depth) {
     note.addEventListener('change', () => edit((x) => { x.note = note.value; }, null, { render: false }));
     const childIn = depth === 1 ? h('input', { type: 'text', 'aria-label': 'תת-משימה פנימית חדשה', placeholder: 'תת-משימה פנימית ו-Enter', ...NOASSIST, maxlength: '300' }) : null;
     if (childIn) childIn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); const v = childIn.value.trim(); if (v) edit((x) => { x.children.push(M.newSub(v)); }, () => `נוספה תת-משימה פנימית: ${v}`); }
+      if (e.key === 'Enter') { e.preventDefault(); const v = childIn.value.trim(); if (v) edit((x) => { const c = M.newSub(v); S.expanded.add(c.id); x.children.push(c); }, () => `נוספה תת-משימה פנימית: ${v}`); }
     });
     const catSel = h('select', { 'aria-label': 'קטגוריה של תת-משימה', onchange: (e) => {
       const v = e.target.value;
@@ -871,6 +898,7 @@ function subItem(t, list, n, index, depth) {
         h('div', { class: 'seg', role: 'group', 'aria-label': 'מצב תת-משימה' }, M.SUB_STATES.map((s) =>
           h('button', { type: 'button', 'aria-pressed': String(st === s.id), onclick: () => setState(s.id) }, s.label)))),
       h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'הערה או סיבה'), note),
+      seg('עדיפות', M.PRIORITIES.map((l, i) => [i, l]), n.priority ?? 1, (v) => edit((x) => { x.priority = v; }, null)),
       dateField('תאריך יעד לתת-משימה', n.due, (v) => edit((x) => { x.due = v; }, null), 'date'),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, n.remindDate ? `תזכורת: ${dueText(n.remindDate, today())}${n.remindAt ? ' ' + n.remindAt : ''}` : 'תזכורת לתת-משימה'),
         remindChips(S.remindPick === nid ? 'date' : '', (v) => {
@@ -1041,7 +1069,7 @@ function mainScreen() {
   else body = settingsScreen();
   const sm = M.summary(S.data.tasks, now);
   const dateLine = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
-  const subs = { home: `${dateLine} · ${sm.open} פתוחות`, cats: `${S.data.categories.length} קטגוריות`, closed: `${sm.closed} משימות`, search: '', settings: '' };
+  const subs = { home: dateLine, cats: `${S.data.categories.length} קטגוריות`, closed: `${sm.closed} משימות`, search: '', settings: '' };
   return h('div', null, topbar(titles[S.tab], { sub: subs[S.tab] }), body, navBar(now));
 }
 

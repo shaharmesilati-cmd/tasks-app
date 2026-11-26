@@ -70,7 +70,7 @@ export function newTask(title, now = new Date(), extra = {}) {
 }
 
 export function newSub(title, extra = {}) {
-  return { id: uid(), title: String(title).trim(), state: 'todo', due: '', remindDate: '', remindAt: '', note: '', category: '', children: [], ...extra };
+  return { id: uid(), title: String(title).trim(), state: 'todo', priority: 1, due: '', remindDate: '', remindAt: '', note: '', category: '', children: [], ...extra };
 }
 
 export function addLog(task, msg, now = new Date()) {
@@ -234,12 +234,12 @@ export function allTags(tasks) {
 export function isReminderDue(t, today) { return isOpen(t) && !!t.remindDate && t.remindDate <= today; }
 
 // A sub-task with its own date or reminder is a task in its own right: it gets its own row in the lists.
-export function subEntries(tasks) {
+export function subEntries(tasks, all = false) {
   const out = [];
   const walk = (t, list) => list.forEach((n) => {
-    if (nodeState(n) === 'todo' && (n.due || n.remindDate)) {
+    if (nodeState(n) === 'todo' && (all || n.due || n.remindDate)) {
       out.push({ id: t.id, nodeId: n.id, isSub: true, parentTitle: t.title, title: n.title, due: n.due || '', remindDate: n.remindDate || '', remindAt: n.remindAt || '',
-        priority: t.priority, category: n.category || t.category, status: 'todo', tags: [], repeat: 'none', subtasks: [], archived: false });
+        priority: n.priority ?? t.priority, category: n.category || t.category, status: 'todo', tags: [], repeat: 'none', subtasks: [], archived: false });
     }
     walk(t, n.children || []);
   });
@@ -282,8 +282,9 @@ function groupsOf(open, today, pull) {
 }
 
 export function homeSections(tasks, today, { scope = 'all', cat = '' } = {}) {
-  const open = tasks.filter((t) => isOpen(t) && inCat(t, cat)).concat(subEntries(tasks).filter((t) => inCat(t, cat)));
-  const groups = groupsOf(open, today, scope === 'all' || scope === 'today');
+  const base = scope === 'subs' ? [] : tasks.filter((t) => isOpen(t) && inCat(t, cat));
+  const open = base.concat(subEntries(tasks, scope === 'subs').filter((t) => inCat(t, cat)));
+  const groups = groupsOf(open, today, scope === 'all' || scope === 'today' || scope === 'subs');
   if (scope === 'week') groups.soon = open.filter((t) => t.due > today && t.due <= addDays(today, 7)).sort(byDue);
   const keys = scope === 'overdue' ? ['overdue'] : scope === 'today' ? ['remind', 'today'] : scope === 'week' ? ['soon'] : ['overdue', 'remind', 'today', 'soon', 'later', 'nodate'];
   return keys.map((k) => ({ id: k, title: SECTION_TITLES[k], tasks: groups[k] })).filter((s) => s.tasks.length);
@@ -345,6 +346,7 @@ function cleanSub(n, depth, catIds) {
   const state = SUB_IDS.includes(n.state) ? n.state : (n.done ? 'done' : 'todo'); // older files used a plain done flag
   const o = {
     id: str(n.id, 40) || uid(), title: str(n.title, 300), state,
+    priority: Number.isInteger(n.priority) && n.priority >= 0 && n.priority < PRIORITIES.length ? n.priority : 1,
     due: isDateStr(n.due) ? n.due : '', remindDate: isDateStr(n.remindDate) ? n.remindDate : '', remindAt: isTimeStr(n.remindAt) ? n.remindAt : '',
     note: str(n.note, 5000),
     category: catIds.has(n.category) ? n.category : '', children: [],
@@ -397,4 +399,32 @@ export function validateData(d) {
     });
   }
   return out;
+}
+
+// ---------- calendar export (reminders only; titles are masked or generic) ----------
+// "משימת אמצעי לחימה" -> "מש*** אמ*** לח***": two letters of each word survive, the rest is hidden.
+export function maskTitle(title) {
+  return String(title).trim().split(/\s+/).filter(Boolean).map((w) => {
+    const a = Array.from(w);
+    return a.length <= 2 ? a.join('') + '***' : a.slice(0, 2).join('') + '***';
+  }).join(' ') || '***';
+}
+const icsEsc = (x) => String(x).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+export function buildIcs(tasks, now, mode = 'masked') {
+  const items = tasks.filter(isOpen).flatMap((t) => [t].concat(subEntries([t]).map((x) => x)))
+    .filter((x) => x.remindDate && x.remindDate >= dateStr(now));
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SafeTasks//HE//EN', 'CALSCALE:GREGORIAN'];
+  const seen = new Set();
+  items.forEach((x, i) => {
+    const key = (x.nodeId || x.id) + x.remindDate;
+    if (seen.has(key)) return; seen.add(key);
+    const time = (x.remindAt || '09:00').replace(':', '');
+    const start = `${x.remindDate.replace(/-/g, '')}T${time}00`;
+    const title = mode === 'masked' ? `תזכורת: ${maskTitle(x.title)}` : 'תזכורת מהאפליקציה';
+    lines.push('BEGIN:VEVENT', `UID:${(x.nodeId || x.id)}-${i}@safetasks.local`, `DTSTAMP:${stamp}`, `DTSTART:${start}`, 'DURATION:PT15M',
+      `SUMMARY:${icsEsc(title)}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(title)}`, 'TRIGGER:PT0M', 'END:VALARM', 'END:VEVENT');
+  });
+  lines.push('END:VCALENDAR');
+  return { text: lines.join('\r\n') + '\r\n', count: seen.size };
 }

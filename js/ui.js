@@ -135,7 +135,7 @@ function lock() {
   S.undo.clear();
   // Keep an unsent new-task form in memory only for 2 minutes, so a quick app switch does not lose typing.
   S.draft = S.newForm && S.newForm.title.trim() + S.newForm.desc.trim() ? { f: S.newForm, t: Date.now() } : null;
-  S.q = ''; S.openId = null; S.newForm = null; S.flow = null; S.catOpen = null; S.cat = ''; S.scope = 'all';
+  S.q = ''; S.openId = null; S.newForm = null; S.flow = null; S.catOpen = null; S.cat = ''; S.scope = 'all'; S.weekScroll = 0;
   S.expanded.clear(); S.fold.clear(); S.more.clear(); S.remindPick = null; S.setupFirst = ''; S.setupStep = 'enter';
   $('dialogRoot').replaceChildren();
   $('toast').replaceChildren();
@@ -335,15 +335,33 @@ function navBar(now) {
 // ---------- home: ALL open tasks, with today's numbers on top ----------
 const dayName = (date, o) => M.parseDate(date).toLocaleDateString('he-IL', o);
 function weekStrip(now) {
-  const days = M.dayStrip(S.data.tasks, now, 7);
-  return h('div', { class: 'week', role: 'group', 'aria-label': 'שבוע קרוב' }, days.map((d, i) => {
+  const days = M.dayStrip(S.data.tasks, now, 35);
+  const el = h('div', { class: 'week', role: 'group', 'aria-label': 'ימים קרובים, אפשר לגלול' }, days.map((d, i) => {
     const on = S.scope === 'day' && S.day === d.date;
+    const first = i === 0 || d.date.endsWith('-01');
     const dots = h('span', { class: 'dots3', 'aria-hidden': 'true' }, Array.from({ length: Math.min(d.n, 3) }, () => h('i')));
-    return h('button', { class: `wd${i === 0 ? ' today' : ''}${d.n ? ' has' : ''}`, type: 'button', 'aria-pressed': String(on),
+    return h('button', { class: `wd${i === 0 ? ' today' : ''}${d.n ? ' has' : ''}${first ? ' first' : ''}`, type: 'button', 'aria-pressed': String(on),
       'aria-label': `${dueText(d.date, now)}, ${d.n} משימות`,
       onclick: () => { if (on) { S.scope = 'all'; } else { S.scope = 'day'; S.day = d.date; } S.cat = ''; render(); } },
+      h('span', { class: 'mn' }, first ? dayName(d.date, { month: 'short' }) : ''),
       h('span', { class: 'dn' }, dayName(d.date, { weekday: 'narrow' })), h('span', { class: 'dd' }, String(Number(d.date.slice(8)))), dots);
   }));
+  el.addEventListener('scroll', () => { S.weekScroll = el.scrollLeft; }, { passive: true });
+  requestAnimationFrame(() => { el.scrollLeft = S.weekScroll || 0; });
+  return el;
+}
+
+function todayCard(sm, now) {
+  const doneToday = S.data.tasks.filter((t) => t.status === 'done' && t.completedAt && M.dateStr(new Date(t.completedAt)) === now).length;
+  const left = sm.today + sm.overdue;
+  const total = doneToday + left;
+  if (!total) return null;
+  const pct = Math.round((doneToday / total) * 100);
+  const ring = h('span', { class: 'ring', 'aria-hidden': 'true' }, h('b', null, `${pct}%`));
+  ring.style.setProperty('--p', String(pct));
+  return h('button', { class: 'todaycard', type: 'button', onclick: () => { S.scope = 'today'; S.cat = ''; render(); } },
+    ring, h('span', { class: 'tc' }, h('strong', null, left ? `${left} נותרו להיום` : 'הכול הושלם להיום'),
+      h('span', { class: 'sub' }, `${doneToday} הושלמו${sm.overdue ? ` · ${sm.overdue} באיחור` : ''}`)), icon('caret-left'));
 }
 
 function homeScreen(now) {
@@ -383,7 +401,7 @@ function homeScreen(now) {
     h('button', { type: 'button', 'aria-pressed': String(view === v), onclick: () => { commit((x) => { x.settings.view = v; }); } }, l))) : null;
   const empty = !sections.length ? h('div', { class: 'empty' }, icon(S.scope === 'day' ? 'calendar-blank' : 'check-circle'),
     h('p', null, S.scope === 'all' && !S.cat ? 'הכול הושלם' : 'אין כאן משימות')) : null;
-  return h('main', { class: 'main' }, weekStrip(now), filters, chips, viewSwitch,
+  return h('main', { class: 'main' }, todayCard(sm, now), weekStrip(now), filters, chips, viewSwitch,
     sections.map((x, i) => foldSection(x, now, { crowded, forceOpen: S.scope !== 'all' || !!S.cat, idx: i })), empty, backup,
     fab('משימה חדשה', () => openNew(S.cat && S.cat !== 'none' ? S.cat : (S.scope === 'day' ? '' : ''))));
 }

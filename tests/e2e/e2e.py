@@ -77,7 +77,7 @@ with sync_playwright() as p:
     page.screenshot(path="/tmp/shots/12-new-form.png", full_page=True)
     page.fill("#newTitle", SECRET); page.keyboard.press("Enter")   # one-step quick add (title + Enter)
     page.wait_for_selector(".week")
-    check("home shows the week strip, filters and the list at once", page.locator(".wd").count() == 7 and page.locator(".f").count() >= 5 and page.locator("li.card").count() == 1)
+    check("home shows the week strip, filters and the list at once", page.locator(".wd").count() == 35 and page.locator(".f").count() >= 5 and page.locator("li.card").count() == 1)
     show_all(page)
     check("quick add (title + Enter) lands in 'ללא מועד'", page.locator(".sechead").filter(has_text="ללא מועד").count() == 1)
     add_task(page, "תיקון ציוד", when="היום", prio="דחוף", new_cat="הנדסה ימית")

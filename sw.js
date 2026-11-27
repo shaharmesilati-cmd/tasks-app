@@ -1,7 +1,7 @@
 // Service worker: keeps the app's OWN files (code only - never data) so it opens offline.
 // It never touches any address except this app's own files.
 // IMPORTANT: change this name on every new release so phones pick up the fix.
-const CACHE = 'safetasks-v10';
+const CACHE = 'safetasks-v11';
 const FILES = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/main.js', './js/ui.js', './js/dom.js', './js/keypad.js', './js/model.js', './js/vault.js', './js/crypto.js', './js/guard.js', './js/icons.js',
